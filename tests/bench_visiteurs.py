@@ -74,7 +74,10 @@ async def login(s, user, pwd):
 async def setup(s) -> dict:
     """Onboarding + comptes + personnes + intégrations (une seule fois)."""
     try:
-        return json.load(open(STATE_FILE))
+        st = json.load(open(STATE_FILE))
+        for login_ in ("julie", "tabsalon", "invite"):  # jetons courts (30 min) : renouvelés à chaque passage
+            st[login_] = await login(s, login_, "motdepasse1")
+        return st
     except OSError:
         pass
     async with s.post(f"{BASE}/api/onboarding/users", json={"client_id": CLIENT, "name": "Richard",

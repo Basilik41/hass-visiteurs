@@ -12,6 +12,9 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, Context, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import (
     async_track_point_in_utc_time,
     async_track_time_change,
@@ -167,6 +170,8 @@ class Visiteurs:
         started = [cur[i] for i in cur.keys() - self._actives]
         ended = [self.visites.get(i) for i in self._actives - cur.keys()]
         self._actives = set(cur)
+        # entités à jour AVANT les événements : une automatisation déclenchée par « visiteurs_debut » lit le bon état
+        self._notify_listeners()
         for v in started:
             self.hass.bus.async_fire(EVENT_DEBUT, self._event_data(v))
             await self._on_start(v)
@@ -228,10 +233,23 @@ class Visiteurs:
     def access_choices(self) -> list[dict]:
         out = []
         for eid in self.o.get(CONF_ACCES) or []:
-            st = self.hass.states.get(eid)
-            out.append({"entity_id": eid, "nom": (st.name if st else None) or eid,
+            out.append({"entity_id": eid, "nom": self._access_name(eid),
                         "alarme": eid.startswith("alarm_control_panel.")})
         return out
+
+    def _access_name(self, eid: str) -> str:
+        """« Porte (Écurie) » : nom de l'entité, complété par sa pièce quand le nom ne la dit pas."""
+        st = self.hass.states.get(eid)
+        name = (st.name if st else None) or eid
+        ent = er.async_get(self.hass).async_get(eid)
+        area_id = ent.area_id if ent else None
+        if ent and not area_id and ent.device_id:
+            dev = dr.async_get(self.hass).async_get(ent.device_id)
+            area_id = dev.area_id if dev else None
+        area = ar.async_get(self.hass).async_get_area(area_id) if area_id else None
+        if area and area.name.lower() not in name.lower():
+            return f"{name} ({area.name})"
+        return name
 
     def message(self, vid: str) -> str:
         v = self._get(vid)
