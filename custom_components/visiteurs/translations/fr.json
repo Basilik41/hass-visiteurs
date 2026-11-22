@@ -1,0 +1,228 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Visiteurs",
+        "description": "Gère les visites : invités qui restent sur place, passages (artisan, livreur, voisin…), visites prévues à l'avance, codes visiteur temporaires et accueil (Wi-Fi, consignes).\n\nRégler le Wi-Fi invité et les accès dans les options après l'installation."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Déjà installé."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Visiteurs",
+        "description": "Réglages des visites. Les visites elles-mêmes se gèrent depuis la carte Visiteurs ou l'agenda.",
+        "data": {
+          "acces_proposes": "Accès qu'un code visiteur peut ouvrir",
+          "wifi_ssid": "Wi-Fi invité : nom du réseau",
+          "wifi_mot_de_passe": "Wi-Fi invité : mot de passe",
+          "wifi_securite": "Wi-Fi invité : sécurité",
+          "consignes": "Consignes de la maison",
+          "lumiere_accueil": "Lumière d'accueil",
+          "duree_passage_h": "Durée par défaut d'un passage",
+          "duree_sur_place_h": "Durée par défaut d'un séjour sur place",
+          "marge_avant_min": "Marge avant l'arrivée prévue",
+          "marge_apres_min": "Marge après le départ prévu",
+          "nuit_debut": "Nuit : début",
+          "nuit_fin": "Nuit : fin",
+          "prevenir": "Prévenir de",
+          "niveau": "Qui prévenir",
+          "notifier": "Action de notification",
+          "gestionnaires": "Qui peut gérer les visiteurs",
+          "motif_tablette": "Comptes des tablettes murales : leur nom contient"
+        },
+        "data_description": {
+          "acces_proposes": "Portes, serrures… que l'on peut cocher pour un code visiteur. Une alarme ne peut être désarmée par un visiteur que si on le coche pour sa visite.",
+          "wifi_mot_de_passe": "Affiché aux visiteurs (QR code de la tablette, message d'accueil). Ne pas mettre celui du Wi-Fi principal.",
+          "consignes": "Ajoutées au message d'accueil et à la page Accueil de la tablette (ex. « Les chiens ne doivent pas sortir »).",
+          "lumiere_accueil": "Allumée au début d'une visite s'il fait nuit, éteinte à 23 h si c'est le module qui l'a allumée.",
+          "marge_avant_min": "La visite est considérée commencée ce temps avant l'heure prévue (pas pour « là maintenant »).",
+          "marge_apres_min": "La visite reste en cours ce temps après le départ prévu, puis le code cesse de fonctionner.",
+          "nuit_debut": "La nuit, une personne détectée par les caméras reste une alerte, même pendant une visite.",
+          "gestionnaires": "Vide : toute la famille (comptes reliés à une personne), jamais les tablettes murales.",
+          "notifier": "Par défaut script.notifier."
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "sur_place": {
+        "name": "Invités sur place"
+      },
+      "passage": {
+        "name": "Passage en cours"
+      },
+      "nuit": {
+        "name": "Nuit (visiteurs)"
+      }
+    },
+    "sensor": {
+      "en_cours": {
+        "name": "Visites en cours"
+      },
+      "prochaine": {
+        "name": "Prochaine visite"
+      }
+    },
+    "calendar": {
+      "agenda": {
+        "name": "Visiteurs"
+      }
+    }
+  },
+  "exceptions": {},
+  "services": {
+    "ajouter": {
+      "name": "Ajouter une visite",
+      "description": "Prévoit une visite (ou « là maintenant » sans début). Renvoie l'identifiant, le code visiteur et le message d'accueil.",
+      "fields": {
+        "nom": {
+          "name": "Nom",
+          "description": "Prénom ou nom du visiteur."
+        },
+        "type": {
+          "name": "Type",
+          "description": "Reste sur place (compte comme une présence) ou passage."
+        },
+        "debut": {
+          "name": "Arrivée",
+          "description": "Vide : maintenant."
+        },
+        "fin": {
+          "name": "Départ",
+          "description": "Vide : selon la durée."
+        },
+        "duree": {
+          "name": "Durée",
+          "description": "Si pas de départ : durée en heures (sinon durée par défaut du type)."
+        },
+        "plaques": {
+          "name": "Plaques",
+          "description": "Plaques du véhicule, séparées par des virgules."
+        },
+        "telephone": {
+          "name": "Téléphone",
+          "description": "Pour lui envoyer le message d'accueil."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Texte libre."
+        },
+        "code": {
+          "name": "Code visiteur",
+          "description": "Crée un code temporaire (tablette, bouton « Visiteur »)."
+        },
+        "acces": {
+          "name": "Accès",
+          "description": "Ce que le code ouvre (parmi les accès proposés dans les options)."
+        },
+        "alarme": {
+          "name": "Peut désarmer l'alarme",
+          "description": "Non par défaut."
+        }
+      }
+    },
+    "modifier": {
+      "name": "Modifier une visite",
+      "description": "Change une visite (prolonger : nouveau départ). Code : « nouveau », « aucun » ou 4 à 8 chiffres.",
+      "fields": {
+        "id": {
+          "name": "Visite",
+          "description": "Identifiant."
+        },
+        "nom": {
+          "name": "Nom",
+          "description": ""
+        },
+        "type": {
+          "name": "Type",
+          "description": ""
+        },
+        "debut": {
+          "name": "Arrivée",
+          "description": ""
+        },
+        "fin": {
+          "name": "Départ",
+          "description": ""
+        },
+        "duree": {
+          "name": "Durée",
+          "description": "Depuis l'arrivée."
+        },
+        "plaques": {
+          "name": "Plaques",
+          "description": ""
+        },
+        "telephone": {
+          "name": "Téléphone",
+          "description": ""
+        },
+        "note": {
+          "name": "Note",
+          "description": ""
+        },
+        "code": {
+          "name": "Code",
+          "description": "nouveau, aucun, garder ou 4 à 8 chiffres."
+        },
+        "acces": {
+          "name": "Accès",
+          "description": ""
+        },
+        "alarme": {
+          "name": "Peut désarmer l'alarme",
+          "description": ""
+        }
+      }
+    },
+    "terminer": {
+      "name": "Terminer une visite",
+      "description": "Le visiteur est parti : la visite s'arrête et son code ne fonctionne plus.",
+      "fields": {
+        "id": {
+          "name": "Visite",
+          "description": "Identifiant."
+        }
+      }
+    },
+    "supprimer": {
+      "name": "Supprimer une visite",
+      "description": "Efface la visite (aussi de l'historique).",
+      "fields": {
+        "id": {
+          "name": "Visite",
+          "description": "Identifiant."
+        }
+      }
+    },
+    "arrivee": {
+      "name": "Signaler l'arrivée",
+      "description": "Le visiteur est arrivé (prévient selon les options).",
+      "fields": {
+        "id": {
+          "name": "Visite",
+          "description": "Identifiant."
+        },
+        "source": {
+          "name": "Source",
+          "description": "Ex. caméra, sonnette."
+        }
+      }
+    },
+    "reconnaitre_plaque": {
+      "name": "Reconnaître une plaque",
+      "description": "Cherche une visite en cours avec cette plaque (lecture tolérante). Renvoie le nom du visiteur et signale son arrivée.",
+      "fields": {
+        "plaques": {
+          "name": "Plaques lues",
+          "description": "Une ou plusieurs lectures."
+        }
+      }
+    }
+  }
+}

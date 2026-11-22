@@ -1,0 +1,15 @@
+{
+  "domain": "visiteurs",
+  "name": "Visiteurs",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["http", "websocket_api", "frontend", "person"],
+  "after_dependencies": ["lovelace", "script", "sun"],
+  "documentation": "https://github.com/Basilik41/hass-visiteurs",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/Basilik41/hass-visiteurs/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "1.0.0"
+}
