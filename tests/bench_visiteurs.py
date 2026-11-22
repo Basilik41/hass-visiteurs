@@ -75,7 +75,7 @@ async def setup(s) -> dict:
     """Onboarding + comptes + personnes + intégrations (une seule fois)."""
     try:
         st = json.load(open(STATE_FILE))
-        for login_ in ("julie", "tabsalon", "invite"):  # jetons courts (30 min) : renouvelés à chaque passage
+        for login_ in ("julie", "tabsalon", "invite", "liaison"):  # jetons courts (30 min) : renouvelés à chaque passage
             st[login_] = await login(s, login_, "motdepasse1")
         return st
     except OSError:
@@ -98,7 +98,7 @@ async def setup(s) -> dict:
         me = await w.ok({"type": "auth/current_user"})
         users = {}
         for name, login_, admin in (("Julie", "julie", False), ("TabDomo Salon", "tabsalon", False),
-                                    ("Invité", "invite", False)):
+                                    ("Invité", "invite", False), ("Liaison", "liaison", False)):
             u = await w.ok({"type": "config/auth/create", "name": name, "group_ids": [
                 "system-admin" if admin else "system-users"], "local_only": False})
             await w.ok({"type": "config/auth_provider/homeassistant/create", "user_id": u["user"]["id"],
@@ -108,7 +108,7 @@ async def setup(s) -> dict:
         if not any(p.get("user_id") == me["id"] for p in persons):  # l'onboarding crée déjà la personne
             await w.ok({"type": "person/create", "name": "Richard", "user_id": me["id"]})
         await w.ok({"type": "person/create", "name": "Julie", "user_id": users["julie"]})
-    for login_ in ("julie", "tabsalon", "invite"):
+    for login_ in ("julie", "tabsalon", "invite", "liaison"):
         st[login_] = await login(s, login_, "motdepasse1")
     for dom in ("code_pin", "visiteurs"):
         async with s.post(f"{BASE}/api/config/config_entries/flow", headers=h, json={"handler": dom}) as r:
@@ -195,6 +195,15 @@ async def main() -> None:
         check("tablette : ajout refusé", code in (401, 403), f"{code} {body}")
         code, body = await svc(s, st["invite"], "visiteurs", "ajouter", {"nom": "Pirate"}, response=True)
         check("compte sans personne : ajout refusé", code in (401, 403), f"{code} {body}")
+        code, body = await svc(s, st["liaison"], "visiteurs", "ajouter", {"nom": "Via centrale", "type": "passage",
+                                                                          "debut": "2030-01-01 10:00:00", "duree": 1})
+        check("compte de liaison (centrale) : ajout accepté", code == 200, f"{code} {body}")
+        async with WS(s, A) as w:
+            info = await w.ok({"type": "visiteurs/info"})
+            vc = next((v for v in info["visites"] if v["nom"] == "Via centrale"), None)
+            check("visite de la centrale : créée par « Centrale »", vc and vc["creee_par"] == "Centrale", str(vc))
+            if vc:
+                await w.ok({"type": "visiteurs/supprimer", "visite": vc["id"]})
         async with WS(s, st["tabsalon"]) as w:
             r = await w.call({"type": "visiteurs/ajouter", "nom": "Pirate"})
             check("tablette : API carte refusée", not r.get("success"), str(r))

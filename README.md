@@ -27,7 +27,7 @@ Gère les visiteurs simplement, depuis le téléphone, la tablette ou l'agenda :
 
 `visiteurs.ajouter` (réponse : `id`, `code`, `message`), `visiteurs.modifier`, `visiteurs.terminer`, `visiteurs.supprimer`, `visiteurs.arrivee`, `visiteurs.reconnaitre_plaque` (réponse : `trouve`, `nom`, `type`, `id`).
 
-Droits : comptes reliés à une personne (ou ceux choisis dans les options), jamais une tablette murale. Les automatisations peuvent tout faire.
+Droits : comptes reliés à une personne (ou ceux choisis dans les options) et comptes de liaison (nom contenant « Liaison », pour la centrale), jamais une tablette murale. Les automatisations peuvent tout faire.
 
 ## Carte
 
@@ -60,4 +60,4 @@ Ils ne changent rien seuls : ce sont vos automatisations qui les lisent. Réserv
 
 ## Tests
 
-`tests/test_visites.py` (fonctions pures, 11), `tests/bench_visiteurs.py` (58 contrôles + 2 après redémarrage sur un vrai Home Assistant avec *Codes d'accès* 1.1), `tests/card_test.py` (26 contrôles dans Chromium : ordinateur, téléphone 380 px, tablette).
+`tests/test_visites.py` (fonctions pures, 11), `tests/bench_visiteurs.py` (60 contrôles + 2 après redémarrage sur un vrai Home Assistant avec *Codes d'accès* 1.1), `tests/card_test.py` (26 contrôles dans Chromium : ordinateur, téléphone 380 px, tablette).

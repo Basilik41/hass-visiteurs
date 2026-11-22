@@ -78,13 +78,20 @@ def can_manage(hass: HomeAssistant, m: Visiteurs, user: User | None) -> bool:
         return False
     allowed = m.o.get(CONF_GESTION) or []
     if allowed:
-        return user.id in allowed
-    return user.is_admin or _person_name(hass, user.id) is not None
+        return user.id in allowed or _is_link(user)
+    return user.is_admin or _is_link(user) or _person_name(hass, user.id) is not None
+
+
+def _is_link(user: User) -> bool:
+    """Compte de liaison entre Home Assistant (Remote HA) : la centrale ajoute ou termine des visites par lui."""
+    return "liaison" in (user.name or "").lower()
 
 
 def who(hass: HomeAssistant, user: User | None) -> str:
     if user is None:
         return "Automatisation"
+    if _is_link(user):
+        return "Centrale"
     return _person_name(hass, user.id) or user.name or "Compte inconnu"
 
 
