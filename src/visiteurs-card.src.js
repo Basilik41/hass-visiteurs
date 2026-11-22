@@ -4,13 +4,30 @@
  *   title: Visiteurs
  */
 /* global __QR__ */
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 const QR = __QR__;
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const pad = (n) => String(n).padStart(2, "0");
 const TYPES = { sur_place: "Reste sur place", passage: "Passage" };
 const JOURS = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
+// passages réguliers : lundi = 0 (comme le serveur)
+const JL = ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."];
+const JLONG = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"];
+const hfr = (hm) => { const [h, m] = String(hm || "").split(":").map(Number); return isNaN(h) ? "?" : `${h} h${m ? " " + pad(m) : ""}`; };
+function repText(r) {
+  if (!r) return "";
+  const d = (r.jours || []).map((j) => JLONG[j]);
+  let jours = d.length === 7 ? "tous les jours" : d.length > 1 ? `${d.slice(0, -1).join(", ")} et ${d.at(-1)}` : d[0] || "?";
+  const sur = r.toutes === 2 ? "deux" : r.toutes;
+  if (d.length < 7) jours = r.toutes > 1 ? `${jours} (une semaine sur ${sur})` : `chaque ${jours}`;
+  else if (r.toutes > 1) jours += `, une semaine sur ${sur}`;
+  return `${jours}, ${hfr(r.de)} – ${hfr(r.a)}`;
+}
+const dateInput = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+// fin de série (minuit après le dernier jour) → dernier jour
+const lastDay = (iso) => new Date(new Date(iso).getTime() - 1000);
+const dfr = (d) => `${d.getDate()}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 
 function qrSvg(text) {
   if (!text) return "";
@@ -222,12 +239,20 @@ class VisiteursCard extends HTMLElement {
 
   _item(v) {
     const i = this.info, g = i.gestion;
+    const serie = v.recurrence;
     let when;
-    if (v.statut === "en_cours") when = `jusqu'à ${quand(v.fin)}`;
+    if (serie && v.statut === "en_cours") when = `passage en cours, jusqu'à ${quand(v.fin)}`;
+    else if (serie && v.statut === "prevue") when = `prochain passage ${quand(v.debut)}`;
+    else if (serie) when = "passages terminés";
+    else if (v.statut === "en_cours") when = `jusqu'à ${quand(v.fin)}`;
     else if (v.statut === "prevue") when = `arrive ${quand(v.debut)} · jusqu'à ${quand(v.fin)}`;
     else when = `${quand(v.debut)} → ${quand(v.fin)}`;
     const tags = [];
     tags.push(`<span class="tag">${esc(TYPES[v.type] || v.type)}</span>`);
+    if (serie) {
+      tags.push(`<span class="tag">🔁 ${esc(repText(serie))}</span>`);
+      if (v.serie_fin) tags.push(`<span class="tag">jusqu'au ${esc(dfr(lastDay(v.serie_fin)))}</span>`);
+    }
     if (v.arrivee) tags.push(`<span class="tag ok">✓ arrivé·e ${esc(quand(v.arrivee.t))}</span>`);
     (v.plaques || []).forEach((p) => tags.push(`<span class="tag">🚗 ${esc(p)}</span>`));
     if (v.a_un_code && g && v.code) {
@@ -242,10 +267,11 @@ class VisiteursCard extends HTMLElement {
     const sure = (k) => this.sure === `${k}:${v.id}`;
     const acts = !g ? "" : `<div class="acts">
       ${v.statut !== "terminee" ? `<button data-a="message" data-id="${esc(v.id)}">✉️ Message</button>` : ""}
-      ${v.statut === "en_cours" ? `<button data-a="plus" data-id="${esc(v.id)}">＋2 h</button>` : ""}
+      ${v.statut === "en_cours" && !serie ? `<button data-a="plus" data-id="${esc(v.id)}">＋2 h</button>` : ""}
       <button data-a="modifier" data-id="${esc(v.id)}">${v.statut === "terminee" ? "Revenir" : "Modifier"}</button>
+      ${serie && v.statut === "prevue" ? `<button class="${sure("sauter") ? "d sure" : ""}" data-a="sauter" data-id="${esc(v.id)}">${sure("sauter") ? `Confirmer : pas ${esc(quand(v.debut))}` : "Pas cette fois"}</button>` : ""}
       ${v.statut === "en_cours" ? `<button class="d ${sure("terminer") ? "sure" : ""}" data-a="terminer" data-id="${esc(v.id)}">${sure("terminer") ? "Confirmer le départ" : "Parti·e"}</button>` : ""}
-      ${v.statut !== "en_cours" ? `<button class="d ${sure("supprimer") ? "sure" : ""}" data-a="supprimer" data-id="${esc(v.id)}">${sure("supprimer") ? "Confirmer" : "Supprimer"}</button>` : ""}
+      ${v.statut !== "en_cours" || serie ? `<button class="d ${sure("supprimer") ? "sure" : ""}" data-a="supprimer" data-id="${esc(v.id)}">${sure("supprimer") ? (serie ? "Confirmer : tous les passages" : "Confirmer") : "Supprimer"}</button>` : ""}
     </div>`;
     return `<div class="v ${esc(v.statut)} ${esc(v.type)}"><div class="l1"><div class="av">${esc((v.nom || "?").slice(0, 1).toUpperCase())}</div>
       <div><div class="nom">${esc(v.nom)}</div><div class="sub">${esc(when)}</div></div></div>
@@ -257,12 +283,29 @@ class VisiteursCard extends HTMLElement {
     const now = new Date();
     if (!v) {
       return { id: null, nom: "", type: "sur_place", maintenant: true, debut: toLocalInput(new Date(now.getTime() + 3600e3)),
-        fin: null, choix: null, plaques: "", telephone: "", note: "", code: false, acces: [], alarme: false, err: "", busy: false, statut: "nouvelle" };
+        fin: null, choix: null, plaques: "", telephone: "", note: "", code: false, acces: [], alarme: false, err: "", busy: false, statut: "nouvelle",
+        ...this._repDefaults(now) };
+    }
+    if (v.recurrence) {
+      const r = v.recurrence;
+      return { id: v.id, nom: v.nom, type: v.type, regulier: true, wasSerie: true, jours: [...r.jours], de: r.de, a: r.a, toutes: r.toutes || 1,
+        depuis: dateInput(new Date(v.serie_debut || v.debut)), jusqu: dateInput(lastDay(v.serie_fin || v.fin)),
+        maintenant: false, debut: toLocalInput(new Date(now.getTime() + 3600e3)), fin: null, choix: null,
+        plaques: (v.plaques || []).join(", "), telephone: v.telephone || "", note: v.note || "",
+        code: !!v.a_un_code, codeMode: "garder", acces: [...(v.acces || [])], alarme: !!v.alarme, err: "", busy: false, statut: v.statut };
     }
     return { id: v.id, nom: v.nom, type: v.type, maintenant: false, debut: toLocalInput(new Date(v.debut)),
       fin: toLocalInput(new Date(v.statut === "terminee" ? Math.max(Date.now() + 2 * 3600e3, new Date(v.fin)) : new Date(v.fin))),
       choix: "autre", plaques: (v.plaques || []).join(", "), telephone: v.telephone || "", note: v.note || "",
-      code: !!v.a_un_code, codeMode: "garder", acces: [...(v.acces || [])], alarme: !!v.alarme, err: "", busy: false, statut: v.statut };
+      code: !!v.a_un_code, codeMode: "garder", acces: [...(v.acces || [])], alarme: !!v.alarme, err: "", busy: false, statut: v.statut,
+      ...this._repDefaults(now) };
+  }
+
+  _repDefaults(now) {
+    const fin = new Date(now);
+    fin.setFullYear(fin.getFullYear() + 1);
+    return { regulier: false, wasSerie: false, jours: [(now.getDay() + 6) % 7], de: "08:00", a: "12:00", toutes: 1,
+      depuis: dateInput(now), jusqu: dateInput(fin) };
   }
 
   _start(f) { return f.maintenant ? new Date() : fromLocalInput(f.debut); }
@@ -272,7 +315,7 @@ class VisiteursCard extends HTMLElement {
     const start = this._start(f) || new Date();
     const quick = quickEnds(f.type, start);
     const fin = f.choix === "autre" ? fromLocalInput(f.fin) : (quick.find(([k]) => k === f.choix)?.[1] || null);
-    const started = f.statut === "en_cours";
+    const started = f.statut === "en_cours" && !f.wasSerie;
     const acc = i.acces || [];
     const alarmChecked = f.acces.some((e) => e.startsWith("alarm_control_panel."));
     return `<div class="fond"><div class="boite" role="dialog" aria-modal="true" aria-labelledby="ft">
@@ -283,15 +326,10 @@ class VisiteursCard extends HTMLElement {
         <button data-f="type" data-v="sur_place" class="${f.type === "sur_place" ? "on" : ""}">🛏️ Reste sur place</button>
         <button data-f="type" data-v="passage" class="${f.type === "passage" ? "on" : ""}">🔧 Passage</button></div>
       <div class="res">${f.type === "sur_place" ? "Compte comme quelqu'un à la maison : pas d'extinction ni de mode absence, pas d'armement automatique." : "Artisan, livreur, voisin… : les caméras le signalent en simple info (sauf la nuit)."}</div>
-      ${started ? "" : `<label class="c">Arrivée</label><div class="seg">
-        <button data-f="maintenant" data-v="1" class="${f.maintenant ? "on" : ""}">Là maintenant</button>
-        <button data-f="maintenant" data-v="0" class="${!f.maintenant ? "on" : ""}">Plus tard</button></div>
-        ${f.maintenant ? "" : `<input id="debut" type="datetime-local" value="${esc(f.debut)}" style="margin-top:6px">`}`}
-      <label class="c">Départ</label><div class="chips">
-        ${quick.map(([k]) => `<button data-f="choix" data-v="${esc(k)}" class="${f.choix === k ? "on" : ""}">${esc(k)}</button>`).join("")}
-        <button data-f="choix" data-v="autre" class="${f.choix === "autre" ? "on" : ""}">Autre…</button></div>
-      ${f.choix === "autre" ? `<input id="fin" type="datetime-local" value="${esc(f.fin || toLocalInput(new Date(start.getTime() + 2 * 3600e3)))}" style="margin-top:6px">` : ""}
-      <div class="res">${fin ? `Jusqu'à ${esc(quand(fin.toISOString()))}` : (f.id ? "" : `Sans choix : ${esc(String(f.type === "passage" ? i.durees?.passage : i.durees?.sur_place))} h`)}</div>
+      <label class="c">Quand</label><div class="seg">
+        <button data-f="regulier" data-v="0" class="${!f.regulier ? "on" : ""}">Une fois</button>
+        <button data-f="regulier" data-v="1" class="${f.regulier ? "on" : ""}">🔁 Régulièrement</button></div>
+      ${f.regulier ? this._repHtml(f) : this._onceHtml(f, started, quick, fin, start)}
       <label class="c" for="plaques">Véhicule (plaque, facultatif)</label><input id="plaques" type="text" maxlength="60" value="${esc(f.plaques)}" placeholder="AB-123-CD" autocapitalize="characters">
       <label class="c" for="tel">Téléphone (pour lui envoyer le message)</label><input id="tel" type="tel" maxlength="30" value="${esc(f.telephone)}">
       ${acc.length ? `<label class="chk"><input type="checkbox" id="code" ${f.code ? "checked" : ""}> Donner un code visiteur (tablette)</label>
@@ -303,6 +341,34 @@ class VisiteursCard extends HTMLElement {
       <label class="c" for="note">Note</label><textarea id="note" maxlength="500">${esc(f.note)}</textarea>
       <div class="pied"><button data-a="annuler">Annuler</button><button class="p" data-a="enregistrer" ${f.busy ? "disabled" : ""}>Enregistrer</button></div>
     </div></div>`;
+  }
+
+  _onceHtml(f, started, quick, fin, start) {
+    const i = this.info;
+    return `${started ? "" : `<label class="c">Arrivée</label><div class="seg">
+        <button data-f="maintenant" data-v="1" class="${f.maintenant ? "on" : ""}">Là maintenant</button>
+        <button data-f="maintenant" data-v="0" class="${!f.maintenant ? "on" : ""}">Plus tard</button></div>
+        ${f.maintenant ? "" : `<input id="debut" type="datetime-local" value="${esc(f.debut)}" style="margin-top:6px">`}`}
+      <label class="c">Départ</label><div class="chips">
+        ${quick.map(([k]) => `<button data-f="choix" data-v="${esc(k)}" class="${f.choix === k ? "on" : ""}">${esc(k)}</button>`).join("")}
+        <button data-f="choix" data-v="autre" class="${f.choix === "autre" ? "on" : ""}">Autre…</button></div>
+      ${f.choix === "autre" ? `<input id="fin" type="datetime-local" value="${esc(f.fin || toLocalInput(new Date(start.getTime() + 2 * 3600e3)))}" style="margin-top:6px">` : ""}
+      <div class="res">${fin ? `Jusqu'à ${esc(quand(fin.toISOString()))}` : (f.id ? "" : `Sans choix : ${esc(String(f.type === "passage" ? i.durees?.passage : i.durees?.sur_place))} h`)}</div>`;
+  }
+
+  _repHtml(f) {
+    const timeIn = (id, val) => `<input id="${id}" type="time" value="${esc(val)}" style="padding:10px;border-radius:10px;border:1px solid var(--divider-color,#ccc);font:inherit;background:var(--card-background-color,#fff);color:inherit">`;
+    const dateIn = (id, val) => `<input id="${id}" type="date" value="${esc(val)}" style="padding:10px;border-radius:10px;border:1px solid var(--divider-color,#ccc);font:inherit;background:var(--card-background-color,#fff);color:inherit">`;
+    const r = { jours: [...f.jours].sort(), de: f.de, a: f.a, toutes: f.toutes };
+    return `<label class="c">Jours</label><div class="chips">
+        ${JL.map((j, n) => `<button data-f="jour" data-v="${n}" class="${f.jours.includes(n) ? "on" : ""}" aria-pressed="${f.jours.includes(n)}">${j}</button>`).join("")}</div>
+      <label class="c">Horaires de chaque passage</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">de ${timeIn("rep_de", f.de)} à ${timeIn("rep_a", f.a)}</div>
+      <label class="c">Fréquence</label><div class="seg">
+        ${[[1, "Chaque semaine"], [2, "Une sur deux"], [3, "Une sur trois"], [4, "Une sur quatre"]].map(([n, lab]) => `<button data-f="toutes" data-v="${n}" class="${f.toutes === n ? "on" : ""}">${lab}</button>`).join("")}</div>
+      <label class="c">Période</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">du ${dateIn("rep_depuis", f.depuis)} au ${dateIn("rep_jusqu", f.jusqu)}</div>
+      <div class="res">${f.jours.length && f.de && f.a && f.de !== f.a ? esc(repText(r)) + (f.a < f.de ? " (jusqu'au lendemain)" : "") : "Choisir au moins un jour et des horaires."}</div>`;
   }
 
   // ───────── réglages (administrateurs) ─────────
@@ -412,6 +478,10 @@ class VisiteursCard extends HTMLElement {
     if (R.getElementById("plaques")) f.plaques = val("plaques");
     if (R.getElementById("tel")) f.telephone = val("tel");
     if (R.getElementById("note")) f.note = val("note");
+    if (R.getElementById("rep_de")) f.de = val("rep_de");
+    if (R.getElementById("rep_a")) f.a = val("rep_a");
+    if (R.getElementById("rep_depuis")) f.depuis = val("rep_depuis");
+    if (R.getElementById("rep_jusqu")) f.jusqu = val("rep_jusqu");
     if (R.getElementById("alarme")) f.alarme = R.getElementById("alarme").checked;
     if (R.getElementById("nouveaucode")) f.codeMode = R.getElementById("nouveaucode").checked ? "nouveau" : "garder";
   }
@@ -425,6 +495,9 @@ class VisiteursCard extends HTMLElement {
         this._readForm();
         const k = b.dataset.f, v = b.dataset.v;
         if (k === "maintenant") this.form.maintenant = v === "1";
+        else if (k === "regulier") { this.form.regulier = v === "1"; if (this.form.regulier && !this.form.id) this.form.type = "passage"; }
+        else if (k === "jour") { const n = +v; this.form.jours = this.form.jours.includes(n) ? this.form.jours.filter((x) => x !== n) : [...this.form.jours, n].sort(); }
+        else if (k === "toutes") this.form.toutes = +v;
         else if (k === "type") { this.form.type = v; if (this.form.choix !== "autre") this.form.choix = null; }
         else if (k === "choix") {
           this.form.choix = v;
@@ -451,7 +524,7 @@ class VisiteursCard extends HTMLElement {
 
   async _act(a, id) {
     const v = id ? this.info.visites.find((x) => x.id === id) : null;
-    if (a !== "terminer" && a !== "supprimer") this.sure = null;
+    if (a !== "terminer" && a !== "supprimer" && a !== "sauter") this.sure = null;
     switch (a) {
       case "reglages": return this._openReg();
       case "r_annuler": this.reg = null; break;
@@ -479,6 +552,7 @@ class VisiteursCard extends HTMLElement {
       }
       case "terminer":
       case "supprimer":
+      case "sauter":
         if (this.sure !== `${a}:${id}`) {
           this.sure = `${a}:${id}`;
           clearTimeout(this._sureT);
@@ -486,7 +560,11 @@ class VisiteursCard extends HTMLElement {
           break;
         }
         this.sure = null;
-        if (await this._call({ type: `visiteurs/${a}`, visite: id })) this._toast(a === "terminer" ? `Visite de ${v.nom} terminée` : "Visite supprimée");
+        if (await this._call({ type: `visiteurs/${a}`, visite: id })) {
+          this._toast(a === "sauter" ? `${v.nom} : pas de passage ${quand(v.debut)}`
+            : a === "terminer" ? (v.recurrence ? `${v.nom} : passage terminé` : `Visite de ${v.nom} terminée`)
+              : v.recurrence ? "Passages supprimés" : "Visite supprimée");
+        }
         break;
       default: break;
     }
@@ -517,6 +595,7 @@ class VisiteursCard extends HTMLElement {
     f.err = "";
     const nom = (f.nom || "").trim();
     if (!nom) { f.err = "Indiquer le nom du visiteur."; return this._render(); }
+    if (f.regulier) return this._saveSerie(f, nom);
     const start = f.maintenant ? null : fromLocalInput(f.debut);
     if (!f.maintenant && f.statut !== "en_cours" && !start) { f.err = "Indiquer l'heure d'arrivée."; return this._render(); }
     const base = start || new Date();
@@ -533,6 +612,32 @@ class VisiteursCard extends HTMLElement {
     if (!i.acces?.length) delete msg.acces;
     msg.code = f.code ? (f.id && this._wasCoded ? (f.codeMode || "garder") : "nouveau") : "aucun";
     if (!f.id && !f.code) msg.code = false;
+    if (f.wasSerie) { // série → visite simple
+      msg.repetition_jours = [];
+      if (!msg.debut) msg.debut = toServer(start || new Date());
+      if (!msg.fin) msg.fin = toServer(new Date((start || new Date()).getTime() + (f.type === "passage" ? i.durees?.passage || 2 : i.durees?.sur_place || 24) * 3600e3));
+    }
+    return this._send(msg, f);
+  }
+
+  _saveSerie(f, nom) {
+    const i = this.info;
+    if (!f.jours.length) { f.err = "Choisir au moins un jour."; return this._render(); }
+    if (!f.de || !f.a || f.de === f.a) { f.err = "Indiquer l'heure de début et l'heure de fin (différentes)."; return this._render(); }
+    if (!f.depuis || !f.jusqu || f.jusqu < f.depuis) { f.err = "La fin de la période doit être après son début."; return this._render(); }
+    if (f.code && !f.acces.length) { f.err = "Cocher au moins un accès pour le code (ou décocher le code)."; return this._render(); }
+    const msg = { type: f.id ? "visiteurs/modifier" : "visiteurs/ajouter", nom, type_visite: f.type, plaques: f.plaques,
+      telephone: f.telephone, note: f.note, acces: f.code ? f.acces : [], alarme: f.code && f.alarme,
+      repetition_jours: f.jours.map((n) => JLONG[n]), heure_debut: f.de, heure_fin: f.a, toutes_les: f.toutes,
+      debut: f.depuis, jusqu_au: f.jusqu };
+    if (f.id) msg.visite = f.id;
+    if (!i.acces?.length) delete msg.acces;
+    msg.code = f.code ? (f.id && this._wasCoded ? (f.codeMode || "garder") : "nouveau") : "aucun";
+    if (!f.id && !f.code) msg.code = false;
+    return this._send(msg, f);
+  }
+
+  async _send(msg, f) {
     f.busy = true; this._render();
     try {
       const r = await this._ws(msg);
@@ -542,7 +647,7 @@ class VisiteursCard extends HTMLElement {
       await this._load();
       if (!f.id) {
         const v = r.visite;
-        this.result = { titre: `${v.nom} : visite enregistrée`, message: r.message, code: v.code, telephone: v.telephone };
+        this.result = { titre: `${v.nom} : ${v.recurrence ? "passages enregistrés" : "visite enregistrée"}`, message: r.message, code: v.code, telephone: v.telephone };
       } else this._toast("Visite modifiée");
     } catch (e) {
       f.busy = false; f.err = e?.message || String(e);

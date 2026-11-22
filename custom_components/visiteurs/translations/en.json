@@ -137,6 +137,26 @@
         "alarme": {
           "name": "Peut désarmer l'alarme",
           "description": "Non par défaut."
+        },
+        "repetition_jours": {
+          "name": "Recurring visits: days",
+          "description": "Days of the recurring visit (every week). Empty list to make it a one-off visit again."
+        },
+        "heure_debut": {
+          "name": "Visits: from",
+          "description": "Start time of each visit."
+        },
+        "heure_fin": {
+          "name": "Visits: to",
+          "description": "End time of each visit."
+        },
+        "toutes_les": {
+          "name": "Every … weeks",
+          "description": "1 = every week, 2 = every other week…"
+        },
+        "jusqu_au": {
+          "name": "Until",
+          "description": "Last day of the visits (empty: one year)."
         }
       }
     },
@@ -191,6 +211,26 @@
         "alarme": {
           "name": "Peut désarmer l'alarme",
           "description": ""
+        },
+        "repetition_jours": {
+          "name": "Recurring visits: days",
+          "description": "Days of the recurring visit (every week). Empty list to make it a one-off visit again."
+        },
+        "heure_debut": {
+          "name": "Visits: from",
+          "description": "Start time of each visit."
+        },
+        "heure_fin": {
+          "name": "Visits: to",
+          "description": "End time of each visit."
+        },
+        "toutes_les": {
+          "name": "Every … weeks",
+          "description": "1 = every week, 2 = every other week…"
+        },
+        "jusqu_au": {
+          "name": "Until",
+          "description": "Last day of the visits (empty: one year)."
         }
       }
     },
@@ -235,6 +275,20 @@
         "plaques": {
           "name": "Plaques lues",
           "description": "Une ou plusieurs lectures."
+        }
+      }
+    },
+    "sauter": {
+      "name": "Skip a visit",
+      "description": "Recurring visit: one occurrence is cancelled (default: the current or next one).",
+      "fields": {
+        "id": {
+          "name": "Visit",
+          "description": "Visit identifier."
+        },
+        "date": {
+          "name": "Date",
+          "description": "Day of the occurrence to skip (empty: current or next)."
         }
       }
     }

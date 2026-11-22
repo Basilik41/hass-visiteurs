@@ -13,6 +13,22 @@ ajouter:
     code: {selector: {boolean: {}}}
     acces: {selector: {entity: {multiple: true}}}
     alarme: {selector: {boolean: {}}}
+    repetition_jours:
+      selector:
+        select:
+          multiple: true
+          options:
+            - {value: lundi, label: Lundi}
+            - {value: mardi, label: Mardi}
+            - {value: mercredi, label: Mercredi}
+            - {value: jeudi, label: Jeudi}
+            - {value: vendredi, label: Vendredi}
+            - {value: samedi, label: Samedi}
+            - {value: dimanche, label: Dimanche}
+    heure_debut: {example: "08:00", selector: {time: {}}}
+    heure_fin: {example: "12:00", selector: {time: {}}}
+    toutes_les: {default: 1, selector: {number: {min: 1, max: 12, step: 1, unit_of_measurement: semaine(s), mode: box}}}
+    jusqu_au: {selector: {date: {}}}
 modifier:
   fields:
     id: {required: true, selector: {text: {}}}
@@ -28,12 +44,32 @@ modifier:
     code: {selector: {text: {}}}
     acces: {selector: {entity: {multiple: true}}}
     alarme: {selector: {boolean: {}}}
+    repetition_jours:
+      selector:
+        select:
+          multiple: true
+          options:
+            - {value: lundi, label: Lundi}
+            - {value: mardi, label: Mardi}
+            - {value: mercredi, label: Mercredi}
+            - {value: jeudi, label: Jeudi}
+            - {value: vendredi, label: Vendredi}
+            - {value: samedi, label: Samedi}
+            - {value: dimanche, label: Dimanche}
+    heure_debut: {example: "08:00", selector: {time: {}}}
+    heure_fin: {example: "12:00", selector: {time: {}}}
+    toutes_les: {default: 1, selector: {number: {min: 1, max: 12, step: 1, unit_of_measurement: semaine(s), mode: box}}}
+    jusqu_au: {selector: {date: {}}}
 terminer:
   fields:
     id: {required: true, selector: {text: {}}}
 supprimer:
   fields:
     id: {required: true, selector: {text: {}}}
+sauter:
+  fields:
+    id: {required: true, selector: {text: {}}}
+    date: {selector: {date: {}}}
 arrivee:
   fields:
     id: {required: true, selector: {text: {}}}

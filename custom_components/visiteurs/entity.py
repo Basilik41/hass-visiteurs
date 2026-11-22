@@ -26,4 +26,4 @@ class VisiteursEntity(Entity):
 
 def brief(v: dict) -> dict:
     return {"id": v["id"], "nom": v.get("nom"), "type": v.get("type"), "debut": v.get("debut"), "fin": v.get("fin"),
-            "plaques": v.get("plaques") or [], "arrive": bool(v.get("arrivee"))}
+            "plaques": v.get("plaques") or [], "arrive": bool(v.get("arrivee")), "regulier": bool(v.get("recurrence"))}

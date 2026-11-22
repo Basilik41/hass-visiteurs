@@ -370,6 +370,107 @@ async def main() -> None:
         async with WS(s, A) as w:
             r = await w.ok({"type": "code_pin/debloquer", "personne": "visiteur", "code_admin": "482917"})
             check("déblocage par un admin", r["ok"], str(r))
+        # ───────── passages réguliers (1.2) ─────────
+        JL = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+        t0 = datetime.now() - timedelta(minutes=5)
+        t1 = datetime.now() + timedelta(minutes=40)
+        jour = JL[t0.weekday()]
+        fin_serie = (t0 + timedelta(days=14)).date().isoformat()
+        async with WS(s, A) as w:
+            await w.ok({"type": "subscribe_events", "event_type": "visiteurs_fin"})
+            await w.ok({"type": "subscribe_events", "event_type": "visiteurs_debut"})
+            code, body = await svc(s, st["julie"], "visiteurs", "ajouter", {
+                "nom": "Maréchal", "type": "passage", "repetition_jours": [jour], "heure_debut": t0.strftime("%H:%M"),
+                "heure_fin": t1.strftime("%H:%M"), "jusqu_au": fin_serie, "plaques": "GH-404-JK", "code": True,
+                "acces": ["cover.porte_banc"]}, response=True)
+            resp = (body or {}).get("service_response", {}) if isinstance(body, dict) else {}
+            mar_id, mar_code = resp.get("id"), resp.get("code")
+            check("série : ajout par l'action (Julie)", code == 200 and mar_id and mar_code, f"{code} {body}")
+            check("série : message « Vos passages … jusqu'au »", "Vos passages" in (resp.get("message") or "") and
+                  "pendant vos passages" in resp.get("message", ""), resp.get("message"))
+            await asyncio.sleep(1)
+            vi = await w.ok({"type": "visiteurs/info"})
+            mar = next((v for v in vi["visites"] if v["id"] == mar_id), {})
+            check("série : passage en cours maintenant", mar.get("statut") == "en_cours" and mar.get("recurrence", {})
+                  .get("jours") == [t0.weekday()], str(mar))
+            pa = await state(s, A, PA)
+            check("série : capteur passage + plaque", "Maréchal" in pa["attributes"]["noms"] and "GH-404-JK" in
+                  (await state(s, A, EC))["attributes"]["plaques"], str(pa))
+            check("série : événement de début", any(e["data"].get("nom") == "Maréchal" and e["data"].get("regulier")
+                                                    for e in w.events if e["event_type"] == "visiteurs_debut"))
+        async with WS(s, st["tabsalon"]) as w:
+            r = await w.ok({"type": "code_pin/executer", "entity_id": "cover.porte_banc", "action": "fermer",
+                            "personne": "visiteur", "code": mar_code})
+            check("série : le code marche pendant le passage", r["ok"], str(r))
+        start = (datetime.utcnow() - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        end = (datetime.utcnow() + timedelta(days=20)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        async with s.get(f"{BASE}/api/calendars/{AG}?start={start}&end={end}",
+                         headers={"Authorization": f"Bearer {A}"}) as r:
+            evs = [e for e in await r.json() if e["summary"] == "Maréchal"]
+        check("série : 3 passages dans l'agenda (J, J+7, J+14)", len(evs) == 3 and all(
+            "FREQ=WEEKLY" in (e.get("rrule") or "") for e in evs), json.dumps(evs)[:400])
+        async with WS(s, A) as w:
+            await w.ok({"type": "subscribe_events", "event_type": "visiteurs_fin"})
+            r = await w.ok({"type": "visiteurs/terminer", "visite": mar_id})
+            await asyncio.sleep(1)
+            check("série : « Parti·e » termine le passage (événement de fin)", r["ok"] and any(
+                e["data"].get("nom") == "Maréchal" for e in w.events if e["event_type"] == "visiteurs_fin"), str(r))
+            vi = await w.ok({"type": "visiteurs/info"})
+            mar = next(v for v in vi["visites"] if v["id"] == mar_id)
+            nxt = datetime.fromisoformat(mar["debut"]).astimezone()
+            check("série : prochain passage dans 7 jours", mar["statut"] == "prevue" and
+                  (nxt.date() - t0.date()).days == 7, str(mar))
+        async with WS(s, st["tabsalon"]) as w:
+            r = await w.ok({"type": "code_pin/executer", "entity_id": "cover.porte_banc", "action": "ouvrir",
+                            "personne": "visiteur", "code": mar_code})
+            check("série : code refusé hors passage", r["ok"] is False, str(r))
+        async with WS(s, A) as w:
+            r = await w.ok({"type": "visiteurs/sauter", "visite": mar_id})
+            vi = await w.ok({"type": "visiteurs/info"})
+            mar = next(v for v in vi["visites"] if v["id"] == mar_id)
+            check("série : « Pas cette fois » → passage suivant (J+14)", r["ok"] and (
+                datetime.fromisoformat(mar["debut"]).astimezone().date() - t0.date()).days == 14, str(mar))
+            r = await w.ok({"type": "visiteurs/modifier", "visite": mar_id,
+                            "jusqu_au": (t0 + timedelta(days=8)).date().isoformat()})
+            check("série : plus aucun passage → refusé", r["ok"] is False and r["erreur"] == "repetition", str(r))
+            r = await w.ok({"type": "visiteurs/modifier", "visite": mar_id, "toutes_les": 2,
+                            "jusqu_au": (t0 + timedelta(days=60)).date().isoformat()})
+            check("série : une semaine sur deux, prolongée", r["ok"] and r["visite"]["recurrence"]["toutes"] == 2,
+                  str(r))
+            r = await w.ok({"type": "visiteurs/ajouter", "nom": "Erreur", "repetition_jours": ["lundi"],
+                            "heure_debut": "08:00", "heure_fin": "08:00"})
+            check("série : horaires identiques refusés", r["ok"] is False and r["erreur"] == "repetition", str(r))
+            r = await w.ok({"type": "visiteurs/ajouter", "nom": "Erreur", "repetition_jours": ["xyz"],
+                            "heure_debut": "08:00", "heure_fin": "09:00"})
+            check("série : jour inconnu refusé", r["ok"] is False and r["erreur"] == "repetition", str(r))
+            # agenda : création d'une série, puis suppression « ce passage et les suivants »
+            d0 = (datetime.now() + timedelta(days=1)).replace(hour=14, minute=0, second=0, microsecond=0)
+            r = await w.call({"type": "calendar/event/create", "entity_id": AG, "event": {
+                "summary": "Ménage", "description": "passage", "dtstart": d0.isoformat(),
+                "dtend": (d0 + timedelta(hours=2)).isoformat(),
+                "rrule": f"FREQ=WEEKLY;BYDAY={['MO','TU','WE','TH','FR','SA','SU'][d0.weekday()]}"}})
+            vi = await w.ok({"type": "visiteurs/info"})
+            men = next((v for v in vi["visites"] if v["nom"] == "Ménage"), {})
+            check("agenda : création d'une série (répétition chaque semaine)", r.get("success") and men.get(
+                "recurrence", {}).get("de") == "14:00" and men.get("type") == "passage", f"{r} {men}")
+            rid = (d0 + timedelta(days=14)).strftime("%Y%m%d")
+            r = await w.call({"type": "calendar/event/delete", "entity_id": AG, "uid": men.get("id", "?"),
+                              "recurrence_id": rid, "recurrence_range": "THISANDFUTURE"})
+            async with s.get(f"{BASE}/api/calendars/{AG}?start={start}&end={(datetime.utcnow() + timedelta(days=60)).strftime('%Y-%m-%dT%H:%M:%SZ')}",
+                             headers={"Authorization": f"Bearer {A}"}) as resp_:
+                evs = [e for e in await resp_.json() if e["summary"] == "Ménage"]
+            check("agenda : « ce passage et les suivants » → 2 passages restants", r.get("success") and len(evs) == 2,
+                  f"{r} {len(evs)}")
+            r = await w.call({"type": "calendar/event/delete", "entity_id": AG, "uid": men.get("id", "?"),
+                              "recurrence_id": (d0 + timedelta(days=7)).strftime("%Y%m%d")})
+            vi = await w.ok({"type": "visiteurs/info"})
+            men = next((v for v in vi["visites"] if v["nom"] == "Ménage"), {})
+            check("agenda : supprimer un seul passage → sauté", r.get("success") and len(men.get("sauf") or []) == 1,
+                  f"{r} {men}")
+            r = await w.ok({"type": "visiteurs/modifier", "visite": men["id"], "repetition_jours": [],
+                            "debut": local(d0), "fin": local(d0 + timedelta(hours=1))})
+            check("série → visite simple", r["ok"] and not r["visite"].get("recurrence"), str(r))
+            await w.ok({"type": "visiteurs/supprimer", "visite": men["id"]})
         # ───────── réglages depuis le tableau de bord (1.1) ─────────
         async with WS(s, st["julie"]) as w:
             r = await w.ok({"type": "visiteurs/reglages"})
@@ -424,7 +525,7 @@ async def main() -> None:
                               "target": {"entity_id": sw["regle_armement"]}})
         check("interrupteur refusé à Julie", not r.get("success") and (await state(s, A, sw["regle_armement"]))[
             "state"] == "on", str(r))
-        json.dump({**st, "mamie": mamie["id"], "marc": marc_id}, open(STATE_FILE, "w"))
+        json.dump({**st, "mamie": mamie["id"], "marc": marc_id, "marechal": mar_id}, open(STATE_FILE, "w"))
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} contrôles OK")
 
 
@@ -438,6 +539,9 @@ async def after_restart(s, st) -> None:
         reg = await w.ok({"type": "config/entity_registry/list"})
         sp = next(e["entity_id"] for e in reg if e["platform"] == "visiteurs" and e["translation_key"] == "sur_place")
     check("après redémarrage : invités sur place", (await state(s, A, sp))["state"] == "on")
+    mar = next((v for v in vi["visites"] if v["nom"] == "Maréchal"), {})
+    check("après redémarrage : série conservée (une semaine sur deux, 2 passages sautés)", mar.get("statut") ==
+          "prevue" and mar.get("recurrence", {}).get("toutes") == 2 and len(mar.get("sauf") or []) == 2, str(mar))
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} contrôles OK")
 
 

@@ -51,6 +51,12 @@ _FIELDS = {
     vol.Optional("code"): _CODE,
     vol.Optional("acces"): vol.Any(None, vol.All(cv.ensure_list, [cv.entity_id])),
     vol.Optional("alarme"): cv.boolean,
+    # passages réguliers : jours (lundi…dimanche), créneau, toutes les N semaines, jusqu'au (date)
+    vol.Optional("repetition_jours"): vol.Any(None, vol.All(cv.ensure_list, [vol.Any(cv.string, vol.Coerce(int))])),
+    vol.Optional("heure_debut"): vol.Any(None, cv.string),
+    vol.Optional("heure_fin"): vol.Any(None, cv.string),
+    vol.Optional("toutes_les"): vol.Any(None, vol.All(vol.Coerce(int), vol.Range(min=1, max=12))),
+    vol.Optional("jusqu_au"): vol.Any(None, cv.string, cv.date, cv.datetime),
 }
 _ID = vol.All(cv.string, vol.Length(min=1, max=32))
 
@@ -97,7 +103,11 @@ def who(hass: HomeAssistant, user: User | None) -> str:
 
 def _clean(data: dict) -> dict:
     names = {str(f) for f in _FIELDS}
-    return {k: v for k, v in data.items() if k in names and v is not None}
+    out = {k: v for k, v in data.items() if k in names and v is not None}
+    for k in ("heure_debut", "heure_fin", "jusqu_au"):  # sélecteurs heure / date : objets → texte
+        if k in out and not isinstance(out[k], str):
+            out[k] = out[k].isoformat()
+    return out
 
 
 # ───────── actions ─────────
@@ -130,6 +140,10 @@ def async_register_services(hass: HomeAssistant) -> None:
         m, w = await guard(call)
         await m.delete(call.data["id"], w)
 
+    async def sauter(call: ServiceCall) -> None:
+        m, w = await guard(call)
+        await m.skip(call.data["id"], w, call.data.get("date"))
+
     async def reconnaitre_plaque(call: ServiceCall) -> ServiceResponse:
         m, _ = await guard(call)
         reads = call.data.get("plaques") or []
@@ -149,6 +163,8 @@ def async_register_services(hass: HomeAssistant) -> None:
                                  supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "terminer", terminer, vol.Schema({vol.Required("id"): _ID}))
     hass.services.async_register(DOMAIN, "supprimer", supprimer, vol.Schema({vol.Required("id"): _ID}))
+    hass.services.async_register(DOMAIN, "sauter", sauter, vol.Schema({
+        vol.Required("id"): _ID, vol.Optional("date"): vol.Any(cv.date, cv.string)}))
     hass.services.async_register(DOMAIN, "arrivee", arrivee, vol.Schema({
         vol.Required("id"): _ID, vol.Optional("source"): vol.All(cv.string, vol.Length(max=60))}))
     hass.services.async_register(DOMAIN, "reconnaitre_plaque", reconnaitre_plaque, vol.Schema({
@@ -179,7 +195,8 @@ def _handler(manage: bool = False) -> Callable:
 
 @callback
 def async_register_ws(hass: HomeAssistant) -> None:
-    for cmd in (ws_info, ws_ajouter, ws_modifier, ws_terminer, ws_supprimer, ws_message, ws_reglages, ws_regler):
+    for cmd in (ws_info, ws_ajouter, ws_modifier, ws_terminer, ws_supprimer, ws_sauter, ws_message, ws_reglages,
+                ws_regler):
         websocket_api.async_register_command(hass, cmd)
 
 
@@ -192,6 +209,7 @@ async def ws_info(hass: HomeAssistant, conn: websocket_api.ActiveConnection, msg
     limit = dt_util.utcnow().timestamp() - msg["jours"] * 86400
     rows = []
     for v in m.visites.values():
+        v = m.eff(v)
         st = m.status(v)
         end = parse_dt(v.get("termine_le")) or parse_dt(v.get("fin"))
         if st == "terminee" and (not manage or end is None or end.timestamp() < limit):
@@ -250,6 +268,14 @@ async def ws_terminer(hass: HomeAssistant, conn: websocket_api.ActiveConnection,
 @_handler(manage=True)
 async def ws_supprimer(hass: HomeAssistant, conn: websocket_api.ActiveConnection, msg: dict, m: Visiteurs) -> None:
     await m.delete(msg["visite"], who(hass, conn.user))
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/sauter", vol.Required("visite"): _ID,
+                                  vol.Optional("date"): cv.string})
+@websocket_api.async_response
+@_handler(manage=True)
+async def ws_sauter(hass: HomeAssistant, conn: websocket_api.ActiveConnection, msg: dict, m: Visiteurs) -> None:
+    await m.skip(msg["visite"], who(hass, conn.user), msg.get("date"))
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/message", vol.Required("visite"): _ID})

@@ -137,6 +137,26 @@
         "alarme": {
           "name": "Peut désarmer l'alarme",
           "description": "Non par défaut."
+        },
+        "repetition_jours": {
+          "name": "Passages réguliers : jours",
+          "description": "Jours de passage (visite qui revient chaque semaine). Liste vide pour revenir à une visite simple."
+        },
+        "heure_debut": {
+          "name": "Passages : de",
+          "description": "Heure de début de chaque passage."
+        },
+        "heure_fin": {
+          "name": "Passages : à",
+          "description": "Heure de fin de chaque passage."
+        },
+        "toutes_les": {
+          "name": "Toutes les … semaines",
+          "description": "1 = chaque semaine, 2 = une semaine sur deux…"
+        },
+        "jusqu_au": {
+          "name": "Jusqu'au",
+          "description": "Dernier jour des passages (vide : un an)."
         }
       }
     },
@@ -191,6 +211,26 @@
         "alarme": {
           "name": "Peut désarmer l'alarme",
           "description": ""
+        },
+        "repetition_jours": {
+          "name": "Passages réguliers : jours",
+          "description": "Jours de passage (visite qui revient chaque semaine). Liste vide pour revenir à une visite simple."
+        },
+        "heure_debut": {
+          "name": "Passages : de",
+          "description": "Heure de début de chaque passage."
+        },
+        "heure_fin": {
+          "name": "Passages : à",
+          "description": "Heure de fin de chaque passage."
+        },
+        "toutes_les": {
+          "name": "Toutes les … semaines",
+          "description": "1 = chaque semaine, 2 = une semaine sur deux…"
+        },
+        "jusqu_au": {
+          "name": "Jusqu'au",
+          "description": "Dernier jour des passages (vide : un an)."
         }
       }
     },
@@ -235,6 +275,20 @@
         "plaques": {
           "name": "Plaques lues",
           "description": "Une ou plusieurs lectures."
+        }
+      }
+    },
+    "sauter": {
+      "name": "Sauter un passage",
+      "description": "Visite régulière : un passage n'a pas lieu (par défaut le passage en cours ou le prochain).",
+      "fields": {
+        "id": {
+          "name": "Visite",
+          "description": "Identifiant de la visite."
+        },
+        "date": {
+          "name": "Date",
+          "description": "Jour du passage à sauter (vide : en cours ou prochain)."
         }
       }
     }

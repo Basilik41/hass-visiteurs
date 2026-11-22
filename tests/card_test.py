@@ -154,6 +154,48 @@ async def main():
             check("séjour en cours : arrivée non modifiable", await card.locator("#debut").count() == 0
                   and await card.locator('[data-f="maintenant"]').count() == 0)
             await card.locator('[data-a="annuler"]').click()
+            # passages réguliers (1.2)
+            item = card.locator(".v", has_text="Maréchal")
+            itxt = await item.inner_text()
+            check("série : 🔁 jours et horaires, prochain passage", "🔁" in itxt and "prochain passage" in itxt
+                  and "une semaine sur deux" in itxt, itxt)
+            check("série : « Pas cette fois » et « Supprimer » proposés", await item.locator('[data-a="sauter"]').count()
+                  == 1 and await item.locator('[data-a="supprimer"]').count() == 1 and await item.locator(
+                      '[data-a="plus"]').count() == 0)
+            await card.locator('[data-a="nouveau"]').click()
+            await card.locator("#nom").fill("Jardinier")
+            await card.locator('[data-f="regulier"][data-v="1"]').click()
+            check("série : type « passage » choisi d'office", "on" in (await card.locator(
+                '[data-f="type"][data-v="passage"]').get_attribute("class") or ""))
+            check("série : pas de champs arrivée / départ", await card.locator('[data-f="maintenant"]').count() == 0
+                  and await card.locator('[data-f="choix"]').count() == 0)
+            for b in await card.locator('[data-f="jour"].on').all():
+                await b.click()
+            await card.locator('[data-a="enregistrer"]').click()
+            check("série : au moins un jour exigé", "au moins un jour" in await card.locator(".err").inner_text())
+            await card.locator('[data-f="jour"][data-v="2"]').click()
+            await card.locator('[data-f="jour"][data-v="4"]').click()
+            await card.locator("#rep_de").fill("09:00")
+            await card.locator("#rep_a").fill("11:30")
+            await card.locator('[data-f="toutes"][data-v="2"]').click()
+            from datetime import date, timedelta as _td
+            await card.locator("#rep_jusqu").fill((date.today() + _td(days=60)).isoformat())
+            check("série : résumé lisible", "mercredi et vendredi (une semaine sur deux), 9 h – 11 h 30" in
+                  await card.locator(".boite").inner_text(), await card.locator(".boite").inner_text())
+            await page.screenshot(path=f"{OUT}/9_serie_formulaire.png")
+            await card.locator('[data-a="enregistrer"]').click()
+            await card.locator("#msg").wait_for(timeout=10000)
+            msg = await card.locator("#msg").input_value()
+            check("série : message « Vos passages »", "Vos passages" in msg and "mercredi et vendredi" in msg, msg)
+            await card.locator('[data-a="fermer"]').click()
+            info = (await ws(s, A, [{"type": "visiteurs/info"}]))[0]["result"]
+            jar = next((v for v in info["visites"] if v["nom"] == "Jardinier"), {})
+            check("série : enregistrée (mer. + ven., 9 h – 11 h 30, 1 sur 2)", jar.get("recurrence") == {
+                "jours": [2, 4], "de": "09:00", "a": "11:30", "toutes": 2} and jar.get("type") == "passage", str(jar))
+            await card.locator(".v", has_text="Jardinier").locator('[data-a="modifier"]').click()
+            check("série : formulaire de modification prérempli", await card.locator("#rep_de").input_value() == "09:00"
+                  and await card.locator('[data-f="jour"].on').count() == 2)
+            await card.locator('[data-a="annuler"]').click()
             # formulaire : erreurs
             await card.locator('[data-a="nouveau"]').click()
             await card.locator('[data-a="enregistrer"]').click()
@@ -195,6 +237,10 @@ async def main():
             box = await card.locator(".boite").bounding_box()
             check("téléphone : formulaire dans l'écran", box and box["width"] <= 380 and box["x"] >= 0, str(box))
             await page.screenshot(path=f"{OUT}/4_telephone_formulaire.png")
+            await card.locator('[data-f="regulier"][data-v="1"]').click()
+            box = await card.locator(".boite").bounding_box()
+            check("téléphone : formulaire « régulièrement » dans l'écran", box and box["width"] <= 380, str(box))
+            await page.screenshot(path=f"{OUT}/10_telephone_serie.png", full_page=False)
             await card.locator('[data-a="annuler"]').click()
             await page.screenshot(path=f"{OUT}/5_telephone_liste.png", full_page=True)
             await ctx.close()

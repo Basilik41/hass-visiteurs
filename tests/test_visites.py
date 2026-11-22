@@ -143,3 +143,96 @@ def test_mot_de_passe_wifi():
     seen = {generate_wifi_password() for _ in range(200)}
     assert len(seen) == 200
     assert all(re.fullmatch(r"[a-hjkmnp-z2-9]{4}-[a-hjkmnp-z2-9]{4}-[a-hjkmnp-z2-9]{4}", p) for p in seen)
+
+
+# ───────── passages réguliers ─────────
+from visiteurs.visites import (  # noqa: E402
+    effective,
+    iter_occurrences,
+    norm_recurrence,
+    occurrence,
+    parse_day,
+    parse_rrule,
+    recurrence_text,
+    rrule_text,
+)
+
+
+def _serie(jours=(1, 3), de="08:00", a="12:00", toutes=1, debut=(2026, 11, 23), fin=(2027, 1, 1), **kw):
+    d = datetime(*debut, tzinfo=PARIS)
+    f = datetime(*fin, tzinfo=PARIS)
+    return {"id": "s1", "nom": "Maréchal", "type": "passage", "debut": d.isoformat(), "fin": f.isoformat(),
+            "recurrence": norm_recurrence({"jours": list(jours), "de": de, "a": a, "toutes": toutes}), **kw}
+
+
+def test_jours_et_regles():
+    assert parse_day("Mardi") == 1 and parse_day("mar") == 1 and parse_day("me") == 2 and parse_day("TU") == 1
+    assert parse_day("dimanche") == 6 and parse_day(0) == 0 and parse_day("x") is None and parse_day(True) is None
+    r = norm_recurrence({"jours": "jeudi, mardi", "de": "8h", "a": "12:30", "toutes": "2"})
+    assert r == {"jours": [1, 3], "de": "08:00", "a": "12:30", "toutes": 2}
+    for bad in ({"jours": [], "de": "8:00", "a": "9:00"}, {"jours": ["lundi"], "de": "8:00", "a": "8:00"},
+                {"jours": ["lundi"], "de": "25:00", "a": "9:00"}, {"jours": ["lundi"], "de": "8:00", "a": "9:00",
+                                                                      "toutes": 13}):
+        try:
+            norm_recurrence(bad)
+            raise AssertionError(bad)
+        except ValueError:
+            pass
+    assert recurrence_text(r) == "mardi et jeudi (une semaine sur deux) de 8 h à 12 h 30"
+    assert recurrence_text({"jours": [0], "de": "14:00", "a": "15:00", "toutes": 1}) == "chaque lundi de 14 h à 15 h"
+    assert rrule_text(r) == "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH"
+    assert parse_rrule("FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH;UNTIL=20270630T215959Z") == ([1, 3], 2,
+                                                                                       datetime(2027, 6, 30).date(), None)
+
+
+def test_occurrences_et_statut():
+    v = _serie()  # mardi et jeudi 8 h – 12 h à partir du lundi 23/11/2026
+    lundi = datetime(2026, 11, 23, 10, tzinfo=PARIS)
+    s, e = occurrence(v, lundi, PARIS, 30)
+    assert s == datetime(2026, 11, 24, 8, tzinfo=PARIS) and e == datetime(2026, 11, 24, 12, tzinfo=PARIS)
+    ev = effective(v, lundi, PARIS, 30, 30)
+    assert statut(ev, lundi, 30, 30) == PREVUE and ev["serie_debut"] == v["debut"]
+    mardi = datetime(2026, 11, 24, 9, tzinfo=PARIS)
+    ev = effective(v, mardi, PARIS, 30, 30)
+    assert statut(ev, mardi, 30, 30) == EN_COURS
+    assert effective(ev, mardi, PARIS, 30, 30)["debut"] == ev["debut"]  # idempotent
+    # marge après : 12 h 20 encore en cours, 12 h 31 → prochain = jeudi
+    assert statut(effective(v, mardi.replace(hour=12, minute=20), PARIS, 30, 30), mardi.replace(hour=12, minute=20),
+                  30, 30) == EN_COURS
+    t = mardi.replace(hour=12, minute=31)
+    ev = effective(v, t, PARIS, 30, 30)
+    assert statut(ev, t, 30, 30) == PREVUE and parse_dt(ev["debut"]) == datetime(2026, 11, 26, 8, tzinfo=PARIS)
+    # liste : 12 passages mardi/jeudi jusqu'au 31/12
+    occ = list(iter_occurrences(v, PARIS, datetime(2026, 11, 1).date()))
+    assert len(occ) == 12 and occ[-1][0] == datetime(2026, 12, 31, 8, tzinfo=PARIS)
+    # après la fin : série épuisée → terminée
+    ev = effective(v, datetime(2027, 1, 2, tzinfo=PARIS), PARIS, 30, 30)
+    assert ev["terminee"] and statut(ev, datetime(2027, 1, 2, tzinfo=PARIS), 30, 30) == TERMINEE
+
+
+def test_une_semaine_sur_deux_sauts_nuit_et_heure_d_ete():
+    v = _serie(jours=[0], toutes=2, debut=(2026, 11, 25))  # 1re semaine = celle du mercredi 25/11 → lundi 23 exclu
+    occ = [s.date().isoformat() for s, _ in iter_occurrences(v, PARIS, datetime(2026, 11, 1).date(), limit=3)]
+    assert occ == ["2026-12-07", "2026-12-21"]  # la série s'arrête le 31/12
+    v = _serie(sauf=["2026-11-24"])
+    s, _ = occurrence(v, datetime(2026, 11, 24, 9, tzinfo=PARIS), PARIS, 30)
+    assert s.date().isoformat() == "2026-11-26"
+    nuit = _serie(jours=[4], de="22:00", a="06:00")  # vendredi 22 h → samedi 6 h
+    t = datetime(2026, 11, 28, 3, tzinfo=PARIS)
+    ev = effective(nuit, t, PARIS, 0, 0)
+    assert statut(ev, t, 0, 0) == EN_COURS and parse_dt(ev["fin"]) == datetime(2026, 11, 28, 6, tzinfo=PARIS)
+    ete = _serie(jours=[6], de="10:00", a="11:00", debut=(2027, 3, 20), fin=(2027, 4, 5))
+    occ = list(iter_occurrences(ete, PARIS, datetime(2027, 3, 1).date()))
+    assert [s.utcoffset() for s, _ in occ] == [timedelta(hours=1), timedelta(hours=2), timedelta(hours=2)]
+    assert all(s.hour == 10 for s, _ in occ)
+
+
+def test_arrivee_par_passage_et_message():
+    v = _serie(arrivee={"t": datetime(2026, 11, 24, 8, 5, tzinfo=PARIS).isoformat(), "source": "code"})
+    assert effective(v, datetime(2026, 11, 24, 9, tzinfo=PARIS), PARIS, 30, 30).get("arrivee")
+    assert not effective(v, datetime(2026, 11, 26, 9, tzinfo=PARIS), PARIS, 30, 30).get("arrivee")
+    ev = effective({**v, "code": "583920"}, datetime(2026, 11, 23, 10, tzinfo=PARIS), PARIS, 30, 30)
+    msg = accueil_message(ev, "la Grange", (None, None), None, ["Porte écurie"],
+                          datetime(2026, 11, 23, 10, tzinfo=PARIS), PARIS)
+    assert "Vos passages (la Grange) : chaque mardi et jeudi de 8 h à 12 h, jusqu'au 31/12/2026." in msg
+    assert "Prochain passage : demain à 8 h." in msg and "pendant vos passages" in msg
