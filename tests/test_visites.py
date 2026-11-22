@@ -236,3 +236,34 @@ def test_arrivee_par_passage_et_message():
                           datetime(2026, 11, 23, 10, tzinfo=PARIS), PARIS)
     assert "Vos passages (la Grange) : chaque mardi et jeudi de 8 h à 12 h, jusqu'au 31/12/2026." in msg
     assert "Prochain passage : demain à 8 h." in msg and "pendant vos passages" in msg
+
+
+def test_nuit_sur_place_dans_une_serie():
+    # papa : tous les jours 17 h – 19 h ; le mercredi 25/11 il reste dormir jusqu'au jeudi 10 h
+    papa = _serie(jours=range(7), de="17:00", a="19:00", sejours=[{
+        "debut": datetime(2026, 11, 25, 17, tzinfo=PARIS).isoformat(),
+        "fin": datetime(2026, 11, 26, 10, tzinfo=PARIS).isoformat()}])
+    t = datetime(2026, 11, 25, 18, tzinfo=PARIS)
+    ev = effective(papa, t, PARIS, 30, 30)
+    assert ev["type"] == "sur_place" and ev["dort_ici"] and statut(ev, t, 30, 30) == EN_COURS
+    assert parse_dt(ev["fin"]) == datetime(2026, 11, 26, 10, tzinfo=PARIS)
+    assert effective(ev, t, PARIS, 30, 30)["type"] == "sur_place"  # idempotent
+    t2 = datetime(2026, 11, 26, 3, tzinfo=PARIS)  # la nuit : toujours là
+    assert statut(effective(papa, t2, PARIS, 30, 30), t2, 30, 30) == EN_COURS
+    t3 = datetime(2026, 11, 26, 12, tzinfo=PARIS)  # le lendemain midi : prochain passage 17 h, de passage
+    ev = effective(papa, t3, PARIS, 30, 30)
+    assert ev["type"] == "passage" and not ev["dort_ici"] and statut(ev, t3, 30, 30) == PREVUE
+    assert parse_dt(ev["debut"]) == datetime(2026, 11, 26, 17, tzinfo=PARIS)
+    # nuit séparée du passage (passage 8 h – 9 h, nuit à 20 h) : deux visites distinctes
+    sep = _serie(jours=[2], de="08:00", a="09:00", sejours=[{
+        "debut": datetime(2026, 11, 25, 20, tzinfo=PARIS).isoformat(),
+        "fin": datetime(2026, 11, 26, 9, tzinfo=PARIS).isoformat()}])
+    t = datetime(2026, 11, 25, 12, tzinfo=PARIS)
+    ev = effective(sep, t, PARIS, 30, 30)
+    assert parse_dt(ev["debut"]) == datetime(2026, 11, 25, 20, tzinfo=PARIS) and ev["type"] == "sur_place"
+    # une nuit après la fin de la série la garde vivante
+    fin = _serie(jours=[0], fin=(2026, 11, 24), sejours=[{
+        "debut": datetime(2026, 12, 1, 20, tzinfo=PARIS).isoformat(),
+        "fin": datetime(2026, 12, 2, 9, tzinfo=PARIS).isoformat()}])
+    ev = effective(fin, datetime(2026, 11, 28, tzinfo=PARIS), PARIS, 30, 30)
+    assert not ev.get("terminee") and ev["type"] == "sur_place"

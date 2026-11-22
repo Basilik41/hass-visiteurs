@@ -291,6 +291,28 @@
           "description": "Day of the occurrence to skip (empty: current or next)."
         }
       }
+    },
+    "sejour": {
+      "name": "Stays overnight",
+      "description": "Recurring visit: adds a night (or more) on site — the visit then counts as staying, with the same code and accesses. « Remove » cancels planned nights.",
+      "fields": {
+        "id": {
+          "name": "Visit",
+          "description": "Recurring visit identifier."
+        },
+        "debut": {
+          "name": "From",
+          "description": "Empty: the current visit, otherwise now."
+        },
+        "fin": {
+          "name": "Until",
+          "description": "Departure time (e.g. tomorrow 10 am)."
+        },
+        "retirer": {
+          "name": "Remove",
+          "description": "Cancels the nights on site (all, or the one starting at « From »)."
+        }
+      }
     }
   }
 }

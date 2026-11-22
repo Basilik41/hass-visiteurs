@@ -196,6 +196,39 @@ async def main():
             check("série : formulaire de modification prérempli", await card.locator("#rep_de").input_value() == "09:00"
                   and await card.locator('[data-f="jour"].on').count() == 2)
             await card.locator('[data-a="annuler"]').click()
+            # « dort ici » (1.3)
+            from datetime import datetime as _dt
+            JLx = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+            t0, t1 = _dt.now() - _td(minutes=5), _dt.now() + _td(minutes=40)
+            await ws(s, A, [{"type": "visiteurs/ajouter", "nom": "Papa", "type_visite": "passage", "repetition_jours": JLx,
+                             "heure_debut": t0.strftime("%H:%M"), "heure_fin": t1.strftime("%H:%M")}])
+            await card.locator(".v", has_text="Papa").wait_for(timeout=70000)
+            await card.locator(".v", has_text="Papa").locator('[data-a="nuit"]').click()
+            check("dort ici : passage en cours → pas d'heure d'arrivée à saisir", await card.locator("#s_debut").count() == 0
+                  and await card.locator("#s_fin").count() == 1)
+            await card.locator('[data-s]', has_text="Demain matin").click()
+            await page.screenshot(path=f"{OUT}/11_dort_ici.png")
+            await card.locator('[data-a="s_ok"]').click()
+            await page.wait_for_timeout(1500)
+            info = (await ws(s, A, [{"type": "visiteurs/info"}]))[0]["result"]
+            pv = next(v for v in info["visites"] if v["nom"] == "Papa")
+            fin = _dt.fromisoformat(pv["fin"]).astimezone()
+            check("dort ici : reste sur place jusqu'à demain 10 h", pv["type"] == "sur_place" and fin.hour == 10 and
+                  (fin.date() - _dt.now().date()).days == 1, str(pv))
+            it = card.locator(".v", has_text="Papa")
+            check("dort ici : affiché dans la liste", "🛏️ dort ici, jusqu'à demain 10 h" in await it.inner_text(),
+                  await it.inner_text())
+            await page.screenshot(path=f"{OUT}/12_papa_liste.png")
+            await it.locator('[data-a="sansnuit"]').click()
+            await it.locator('[data-a="sansnuit"]').click()
+            await page.wait_for_timeout(1500)
+            info = (await ws(s, A, [{"type": "visiteurs/info"}]))[0]["result"]
+            pv = next(v for v in info["visites"] if v["nom"] == "Papa")
+            check("annuler la nuit (double appui) : de nouveau de passage", pv["type"] == "passage" and not pv["sejours"], str(pv))
+            await card.locator(".v", has_text="Jardinier").locator('[data-a="nuit"]').click()
+            check("dort ici sur un passage à venir : heure d'arrivée proposée", await card.locator("#s_debut").count() == 1)
+            await card.locator('[data-a="s_annuler"]').click()
+            await ws(s, A, [{"type": "visiteurs/supprimer", "visite": pv["id"]}])
             # formulaire : erreurs
             await card.locator('[data-a="nouveau"]').click()
             await card.locator('[data-a="enregistrer"]').click()

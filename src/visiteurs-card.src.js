@@ -4,7 +4,7 @@
  *   title: Visiteurs
  */
 /* global __QR__ */
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 const QR = __QR__;
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -165,12 +165,12 @@ class VisiteursCard extends HTMLElement {
     // rechargé quand une entité du module change (début, fin, arrivée…)
     const sig = Object.keys(h.states).filter((e) => /^(sensor|binary_sensor)\..*visit/.test(e))
       .map((e) => h.states[e].last_updated).join("|");
-    if (sig !== this._sig) { const had = this._sig !== undefined; this._sig = sig; if (had && !this.reg && !this.form) this._load(); }
+    if (sig !== this._sig) { const had = this._sig !== undefined; this._sig = sig; if (had && !this.reg && !this.form && !this.stay) this._load(); }
   }
 
   connectedCallback() {
     clearInterval(this._timer);
-    this._timer = setInterval(() => { if (!this.form && !this.reg) this._load(); }, 60000);
+    this._timer = setInterval(() => { if (!this.form && !this.reg && !this.stay) this._load(); }, 60000);
   }
   disconnectedCallback() { clearInterval(this._timer); }
 
@@ -204,7 +204,7 @@ class VisiteursCard extends HTMLElement {
     if (this._err) body = `<p class="err">${esc(this._err)}</p>`;
     else if (!this.info) body = `<p class="vide">Chargement…</p>`;
     else body = this.mode === "accueil" ? this._accueil() : this._gestion();
-    this.shadowRoot.innerHTML = `<style>${CSS}</style><ha-card>${body}</ha-card>${this.form ? this._formHtml() : ""}${this.result ? this._resultHtml() : ""}${this.reg ? this._regHtml() : ""}`;
+    this.shadowRoot.innerHTML = `<style>${CSS}</style><ha-card>${body}</ha-card>${this.form ? this._formHtml() : ""}${this.result ? this._resultHtml() : ""}${this.reg ? this._regHtml() : ""}${this.stay ? this._stayHtml() : ""}`;
     this._bind();
   }
 
@@ -241,7 +241,9 @@ class VisiteursCard extends HTMLElement {
     const i = this.info, g = i.gestion;
     const serie = v.recurrence;
     let when;
-    if (serie && v.statut === "en_cours") when = `passage en cours, jusqu'à ${quand(v.fin)}`;
+    if (serie && v.dort_ici && v.statut === "en_cours") when = `🛏️ dort ici, jusqu'à ${quand(v.fin)}`;
+    else if (serie && v.dort_ici && v.statut === "prevue") when = `arrive ${quand(v.debut)}, dort ici jusqu'à ${quand(v.fin)}`;
+    else if (serie && v.statut === "en_cours") when = `passage en cours, jusqu'à ${quand(v.fin)}`;
     else if (serie && v.statut === "prevue") when = `prochain passage ${quand(v.debut)}`;
     else if (serie) when = "passages terminés";
     else if (v.statut === "en_cours") when = `jusqu'à ${quand(v.fin)}`;
@@ -252,6 +254,8 @@ class VisiteursCard extends HTMLElement {
     if (serie) {
       tags.push(`<span class="tag">🔁 ${esc(repText(serie))}</span>`);
       if (v.serie_fin) tags.push(`<span class="tag">jusqu'au ${esc(dfr(lastDay(v.serie_fin)))}</span>`);
+      (v.sejours || []).filter((x) => !(v.dort_ici && new Date(x.fin) <= new Date(v.fin)))
+        .forEach((x) => tags.push(`<span class="tag">🛏️ dort ici ${esc(quand(x.debut))} → ${esc(quand(x.fin))}</span>`));
     }
     if (v.arrivee) tags.push(`<span class="tag ok">✓ arrivé·e ${esc(quand(v.arrivee.t))}</span>`);
     (v.plaques || []).forEach((p) => tags.push(`<span class="tag">🚗 ${esc(p)}</span>`));
@@ -269,6 +273,8 @@ class VisiteursCard extends HTMLElement {
       ${v.statut !== "terminee" ? `<button data-a="message" data-id="${esc(v.id)}">✉️ Message</button>` : ""}
       ${v.statut === "en_cours" && !serie ? `<button data-a="plus" data-id="${esc(v.id)}">＋2 h</button>` : ""}
       <button data-a="modifier" data-id="${esc(v.id)}">${v.statut === "terminee" ? "Revenir" : "Modifier"}</button>
+      ${v.statut !== "terminee" && (serie || v.type === "passage") ? `<button data-a="nuit" data-id="${esc(v.id)}">🛏️ Dort ici</button>` : ""}
+      ${serie && v.sejours?.length ? `<button class="${sure("sansnuit") ? "d sure" : ""}" data-a="sansnuit" data-id="${esc(v.id)}">${sure("sansnuit") ? "Confirmer : plus de nuit" : "Annuler la nuit"}</button>` : ""}
       ${serie && v.statut === "prevue" ? `<button class="${sure("sauter") ? "d sure" : ""}" data-a="sauter" data-id="${esc(v.id)}">${sure("sauter") ? `Confirmer : pas ${esc(quand(v.debut))}` : "Pas cette fois"}</button>` : ""}
       ${v.statut === "en_cours" ? `<button class="d ${sure("terminer") ? "sure" : ""}" data-a="terminer" data-id="${esc(v.id)}">${sure("terminer") ? "Confirmer le départ" : "Parti·e"}</button>` : ""}
       ${v.statut !== "en_cours" || serie ? `<button class="d ${sure("supprimer") ? "sure" : ""}" data-a="supprimer" data-id="${esc(v.id)}">${sure("supprimer") ? (serie ? "Confirmer : tous les passages" : "Confirmer") : "Supprimer"}</button>` : ""}
@@ -288,7 +294,7 @@ class VisiteursCard extends HTMLElement {
     }
     if (v.recurrence) {
       const r = v.recurrence;
-      return { id: v.id, nom: v.nom, type: v.type, regulier: true, wasSerie: true, jours: [...r.jours], de: r.de, a: r.a, toutes: r.toutes || 1,
+      return { id: v.id, nom: v.nom, type: v.type_serie || v.type, regulier: true, wasSerie: true, jours: [...r.jours], de: r.de, a: r.a, toutes: r.toutes || 1,
         depuis: dateInput(new Date(v.serie_debut || v.debut)), jusqu: dateInput(lastDay(v.serie_fin || v.fin)),
         maintenant: false, debut: toLocalInput(new Date(now.getTime() + 3600e3)), fin: null, choix: null,
         plaques: (v.plaques || []).join(", "), telephone: v.telephone || "", note: v.note || "",
@@ -369,6 +375,64 @@ class VisiteursCard extends HTMLElement {
       <label class="c">Période</label>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">du ${dateIn("rep_depuis", f.depuis)} au ${dateIn("rep_jusqu", f.jusqu)}</div>
       <div class="res">${f.jours.length && f.de && f.a && f.de !== f.a ? esc(repText(r)) + (f.a < f.de ? " (jusqu'au lendemain)" : "") : "Choisir au moins un jour et des horaires."}</div>`;
+  }
+
+  // ───────── « dort ici » : nuit sur place pour un visiteur de passage ─────────
+  _openStay(v) {
+    const enCours = v.statut === "en_cours";
+    let base = enCours ? new Date() : new Date(v.debut);
+    if (isNaN(base)) base = new Date();
+    const fin = atHour(base, 1, 10);
+    this.stay = { id: v.id, nom: v.nom, serie: !!v.recurrence, enCours, debut: toLocalInput(base), fin: toLocalInput(fin), err: "", busy: false };
+  }
+
+  _stayHtml() {
+    const st = this.stay;
+    const base = (st.enCours || !st.serie ? null : fromLocalInput(st.debut)) || new Date();
+    const chips = [["Demain matin", atHour(base, 1, 10)], ["Demain soir", atHour(base, 1, 19)], ["2 nuits", atHour(base, 2, 10)], ["3 nuits", atHour(base, 3, 10)]];
+    return `<div class="fond" data-fond="stay"><div class="boite" role="dialog" aria-modal="true" aria-labelledby="stt">
+      <h2 id="stt">🛏️ ${esc(st.nom)} reste dormir</h2>
+      ${st.err ? `<p class="err" role="alert">${esc(st.err)}</p>` : ""}
+      ${st.serie && !st.enCours ? `<label class="c" for="s_debut">Arrivée</label><input id="s_debut" type="datetime-local" value="${esc(st.debut)}">` : ""}
+      <label class="c">Départ</label><div class="chips">
+        ${chips.map(([k, d]) => `<button data-s="${esc(toLocalInput(d))}" class="${st.fin === toLocalInput(d) ? "on" : ""}">${esc(k)}</button>`).join("")}</div>
+      <input id="s_fin" type="datetime-local" value="${esc(st.fin)}" style="margin-top:6px">
+      <div class="res">Pendant ce temps, il compte comme quelqu'un à la maison (pas de mode absence ni d'armement automatique).${st.serie ? " Même code, mêmes accès ; les passages habituels continuent ensuite." : ""}</div>
+      <div class="pied"><button data-a="s_annuler">Annuler</button><button class="p" data-a="s_ok" ${st.busy ? "disabled" : ""}>Enregistrer</button></div>
+    </div></div>`;
+  }
+
+  _readStay() {
+    const R = this.shadowRoot, st = this.stay;
+    if (!st) return;
+    if (R.getElementById("s_debut")) st.debut = R.getElementById("s_debut").value;
+    if (R.getElementById("s_fin")) st.fin = R.getElementById("s_fin").value;
+  }
+
+  async _saveStay() {
+    this._readStay();
+    const st = this.stay;
+    st.err = "";
+    const fin = fromLocalInput(st.fin);
+    const debut = st.serie && !st.enCours ? fromLocalInput(st.debut) : null;
+    if (!fin) { st.err = "Indiquer l'heure de départ."; return this._render(); }
+    if (st.serie && !st.enCours && !debut) { st.err = "Indiquer l'heure d'arrivée."; return this._render(); }
+    if (fin <= (debut || new Date())) { st.err = "Le départ doit être après l'arrivée."; return this._render(); }
+    const msg = st.serie ? { type: "visiteurs/sejour", visite: st.id, fin: toServer(fin) }
+      : { type: "visiteurs/modifier", visite: st.id, type_visite: "sur_place", fin: toServer(fin) };
+    if (debut) msg.debut = toServer(debut);
+    st.busy = true; this._render();
+    try {
+      const r = await this._ws(msg);
+      st.busy = false;
+      if (!r.ok) { st.err = r.message || "Refusé"; return this._render(); }
+      this.stay = null;
+      await this._load();
+      this._toast(`${st.nom} dort ici jusqu'à ${quand(fin.toISOString())}`);
+    } catch (e) {
+      st.busy = false; st.err = e?.message || String(e);
+    }
+    this._render();
   }
 
   // ───────── réglages (administrateurs) ─────────
@@ -519,12 +583,16 @@ class VisiteursCard extends HTMLElement {
     if (this.reg) {
       R.querySelectorAll("[data-rs]").forEach((b) => b.addEventListener("click", () => { this._readReg(); this.reg.v[b.dataset.rs] = b.dataset.v; this._render(); }));
     }
+    if (this.stay) {
+      R.querySelectorAll("[data-s]").forEach((b) => b.addEventListener("click", () => { this._readStay(); this.stay.fin = b.dataset.s; this._render(); }));
+      R.querySelector('[data-fond="stay"]')?.addEventListener("click", (e) => { if (e.target.classList.contains("fond") && !this.stay.busy) { this.stay = null; this._render(); } });
+    }
     if (this.result) R.querySelector(".fond")?.addEventListener("click", (e) => { if (e.target.classList.contains("fond")) { this.result = null; this._render(); } });
   }
 
   async _act(a, id) {
     const v = id ? this.info.visites.find((x) => x.id === id) : null;
-    if (a !== "terminer" && a !== "supprimer" && a !== "sauter") this.sure = null;
+    if (a !== "terminer" && a !== "supprimer" && a !== "sauter" && a !== "sansnuit") this.sure = null;
     switch (a) {
       case "reglages": return this._openReg();
       case "r_annuler": this.reg = null; break;
@@ -533,6 +601,9 @@ class VisiteursCard extends HTMLElement {
       case "nouveau": this.form = this._newForm(null); this._wasCoded = false; this._focused = false; break;
       case "modifier": this.form = this._newForm(v); this._wasCoded = !!v?.a_un_code; this._focused = false; break;
       case "annuler": this.form = null; break;
+      case "nuit": this._openStay(v); break;
+      case "s_annuler": this.stay = null; break;
+      case "s_ok": return this._saveStay();
       case "fermer": this.result = null; break;
       case "voir": this.reveal.has(id) ? this.reveal.delete(id) : this.reveal.add(id); break;
       case "enregistrer": return this._save();
@@ -553,6 +624,7 @@ class VisiteursCard extends HTMLElement {
       case "terminer":
       case "supprimer":
       case "sauter":
+      case "sansnuit":
         if (this.sure !== `${a}:${id}`) {
           this.sure = `${a}:${id}`;
           clearTimeout(this._sureT);
@@ -560,8 +632,8 @@ class VisiteursCard extends HTMLElement {
           break;
         }
         this.sure = null;
-        if (await this._call({ type: `visiteurs/${a}`, visite: id })) {
-          this._toast(a === "sauter" ? `${v.nom} : pas de passage ${quand(v.debut)}`
+        if (await this._call(a === "sansnuit" ? { type: "visiteurs/sejour", visite: id, retirer: true } : { type: `visiteurs/${a}`, visite: id })) {
+          this._toast(a === "sansnuit" ? `${v.nom} : nuit annulée` : a === "sauter" ? `${v.nom} : pas de passage ${quand(v.debut)}`
             : a === "terminer" ? (v.recurrence ? `${v.nom} : passage terminé` : `Visite de ${v.nom} terminée`)
               : v.recurrence ? "Passages supprimés" : "Visite supprimée");
         }

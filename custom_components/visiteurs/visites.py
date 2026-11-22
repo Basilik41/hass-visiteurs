@@ -183,21 +183,41 @@ def occurrence(v: dict, now: datetime, tz, apres: int) -> tuple[datetime, dateti
 
 
 def effective(v: dict, now: datetime, tz, avant: int, apres: int) -> dict:
-    """Une série vue comme une visite ordinaire : debut / fin = passage en cours ou prochain.
+    """Une série vue comme une visite ordinaire : debut / fin = passage en cours ou prochain, fusionné avec une
+    nuit sur place ajoutée (« dort ici » : la visite devient « reste sur place » le temps de la nuit).
     Les autres visites sont rendues telles quelles."""
     if not v.get("recurrence") or v.get("terminee"):
         return v
     e = dict(v)
     e.setdefault("serie_debut", v.get("debut"))
     e.setdefault("serie_fin", v.get("fin"))
-    occ = occurrence(e, now, tz, apres)
-    if occ is None:  # série épuisée
+    e.setdefault("type_serie", v.get("type"))
+    gap = timedelta(minutes=avant + apres)
+    wins: list[tuple[datetime, datetime, bool]] = []
+    from_day = (now.astimezone(tz) - timedelta(days=1)).date()
+    for s, f in iter_occurrences(e, tz, from_day):
+        if f + timedelta(minutes=apres) > now:
+            wins.append((s, f, False))
+            if len(wins) >= 3:
+                break
+    for x in v.get("sejours") or []:
+        s, f = parse_dt(x.get("debut")), parse_dt(x.get("fin"))
+        if s and f and f > s and f + timedelta(minutes=apres) > now:
+            wins.append((s, f, True))
+    if not wins:  # série épuisée
         e["debut"], e["fin"] = e["serie_debut"], e["serie_fin"]
         e["terminee"] = True
         e.setdefault("termine_le", e["serie_fin"])
         return e
-    s, f = occ
+    wins.sort(key=lambda w: w[0])
+    s, f, nuit = wins[0]
+    for s2, f2, n2 in wins[1:]:  # passage et nuit qui se suivent : une seule visite
+        if s2 > f + gap:
+            break
+        f, nuit = max(f, f2), nuit or n2
     e["debut"], e["fin"], e["immediate"] = s.isoformat(), f.isoformat(), False
+    e["type"] = SUR_PLACE if nuit else e["type_serie"]
+    e["dort_ici"] = nuit
     arr = parse_dt((v.get("arrivee") or {}).get("t"))
     if v.get("arrivee") and (arr is None or arr < s - timedelta(minutes=avant)):
         e.pop("arrivee")  # arrivée d'un passage précédent

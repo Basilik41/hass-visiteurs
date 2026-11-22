@@ -140,6 +140,13 @@ def async_register_services(hass: HomeAssistant) -> None:
         m, w = await guard(call)
         await m.delete(call.data["id"], w)
 
+    async def sejour(call: ServiceCall) -> None:
+        m, w = await guard(call)
+        if call.data.get("retirer"):
+            await m.remove_stays(call.data["id"], w, call.data.get("debut"))
+        else:
+            await m.add_stay(call.data["id"], w, call.data.get("fin"), call.data.get("debut"))
+
     async def sauter(call: ServiceCall) -> None:
         m, w = await guard(call)
         await m.skip(call.data["id"], w, call.data.get("date"))
@@ -163,6 +170,9 @@ def async_register_services(hass: HomeAssistant) -> None:
                                  supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "terminer", terminer, vol.Schema({vol.Required("id"): _ID}))
     hass.services.async_register(DOMAIN, "supprimer", supprimer, vol.Schema({vol.Required("id"): _ID}))
+    hass.services.async_register(DOMAIN, "sejour", sejour, vol.Schema({
+        vol.Required("id"): _ID, vol.Optional("debut"): vol.Any(None, cv.string, cv.datetime),
+        vol.Optional("fin"): vol.Any(None, cv.string, cv.datetime), vol.Optional("retirer"): cv.boolean}))
     hass.services.async_register(DOMAIN, "sauter", sauter, vol.Schema({
         vol.Required("id"): _ID, vol.Optional("date"): vol.Any(cv.date, cv.string)}))
     hass.services.async_register(DOMAIN, "arrivee", arrivee, vol.Schema({
@@ -195,8 +205,8 @@ def _handler(manage: bool = False) -> Callable:
 
 @callback
 def async_register_ws(hass: HomeAssistant) -> None:
-    for cmd in (ws_info, ws_ajouter, ws_modifier, ws_terminer, ws_supprimer, ws_sauter, ws_message, ws_reglages,
-                ws_regler):
+    for cmd in (ws_info, ws_ajouter, ws_modifier, ws_terminer, ws_supprimer, ws_sauter, ws_sejour, ws_message,
+                ws_reglages, ws_regler):
         websocket_api.async_register_command(hass, cmd)
 
 
@@ -276,6 +286,19 @@ async def ws_supprimer(hass: HomeAssistant, conn: websocket_api.ActiveConnection
 @_handler(manage=True)
 async def ws_sauter(hass: HomeAssistant, conn: websocket_api.ActiveConnection, msg: dict, m: Visiteurs) -> None:
     await m.skip(msg["visite"], who(hass, conn.user), msg.get("date"))
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/sejour", vol.Required("visite"): _ID,
+                                  vol.Optional("debut"): cv.string, vol.Optional("fin"): cv.string,
+                                  vol.Optional("retirer"): cv.boolean})
+@websocket_api.async_response
+@_handler(manage=True)
+async def ws_sejour(hass: HomeAssistant, conn: websocket_api.ActiveConnection, msg: dict, m: Visiteurs) -> dict:
+    if msg.get("retirer"):
+        v = await m.remove_stays(msg["visite"], who(hass, conn.user), msg.get("debut"))
+    else:
+        v = await m.add_stay(msg["visite"], who(hass, conn.user), msg.get("fin"), msg.get("debut"))
+    return {"visite": m.public(v, True)}
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/message", vol.Required("visite"): _ID})

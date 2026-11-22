@@ -89,6 +89,13 @@ class Agenda(VisiteursEntity, CalendarEntity):
                     ev = self._event(v, occ)
                     if ev and ev.end > start_date:
                         out.append(ev)
+                for x in v.get("sejours") or []:  # nuits sur place ajoutées
+                    d, f = parse_dt(x.get("debut")), parse_dt(x.get("fin"))
+                    if d and f and f > start_date and d < end_date:
+                        out.append(CalendarEvent(start=dt_util.as_local(d), end=dt_util.as_local(f),
+                                                 summary=f"{v.get('nom') or 'Visiteur'} (dort ici)",
+                                                 description=TYPE_LABELS.get("sur_place", ""), uid=v["id"],
+                                                 recurrence_id="S" + dt_util.as_local(d).strftime("%Y%m%dT%H%M%S")))
                 continue
             ev = self._event(v)
             if ev and ev.end > start_date and ev.start < end_date:
@@ -129,6 +136,12 @@ class Agenda(VisiteursEntity, CalendarEntity):
                                  recurrence_range: str | None = None) -> None:
         try:
             v = self.mgr.visites.get(uid) or {}
+            if v.get("recurrence") and recurrence_id and recurrence_id.startswith("S"):  # une nuit sur place
+                r = recurrence_id[1:]
+                start = dt_util.parse_datetime(f"{r[:4]}-{r[4:6]}-{r[6:8]}T{r[9:11]}:{r[11:13]}:{r[13:15]}")
+                await self.mgr.remove_stays(uid, "Agenda", start.replace(tzinfo=dt_util.get_default_time_zone())
+                                            if start else None)
+                return
             day = _rid_date(recurrence_id)
             if v.get("recurrence") and day is not None:
                 if recurrence_range == "THISANDFUTURE":

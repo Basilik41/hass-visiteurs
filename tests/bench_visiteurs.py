@@ -471,6 +471,64 @@ async def main() -> None:
                             "debut": local(d0), "fin": local(d0 + timedelta(hours=1))})
             check("série → visite simple", r["ok"] and not r["visite"].get("recurrence"), str(r))
             await w.ok({"type": "visiteurs/supprimer", "visite": men["id"]})
+        # ───────── passage régulier qui reste dormir (1.3) ─────────
+        t0 = datetime.now() - timedelta(minutes=5)
+        t1 = datetime.now() + timedelta(minutes=40)
+        demain10 = (datetime.now() + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+        async with WS(s, A) as w:
+            r = await w.ok({"type": "visiteurs/ajouter", "nom": "Papa", "type_visite": "passage",
+                            "repetition_jours": JL, "heure_debut": t0.strftime("%H:%M"), "heure_fin": t1.strftime("%H:%M"),
+                            "code": True, "acces": ["cover.porte_banc"]})
+            papa = r.get("visite", {})
+            check("papa : passage tous les jours, en cours", r["ok"] and papa["statut"] == "en_cours" and
+                  papa["type"] == "passage", str(r))
+            await asyncio.sleep(1)
+            await w.ok({"type": "subscribe_events", "event_type": "visiteurs_debut"})
+            r = await w.ok({"type": "visiteurs/sejour", "visite": papa["id"], "fin": local(demain10)})
+            pv = r.get("visite", {})
+            check("papa dort ici : reste sur place jusqu'à demain 10 h", r["ok"] and pv["type"] == "sur_place" and
+                  pv["dort_ici"] and datetime.fromisoformat(pv["fin"]).astimezone().replace(tzinfo=None) == demain10,
+                  str(r))
+            await asyncio.sleep(1)
+            sp = await state(s, A, SP)
+            pa = await state(s, A, PA)
+            check("papa dort ici : compte comme invité sur place (plus en passage)", "Papa" in sp["attributes"]["noms"]
+                  and "Papa" not in (pa["attributes"].get("noms") or []), f"{sp} {pa}")
+            check("papa dort ici : pas de 2e annonce de début", not [e for e in w.events if e.get("event_type") ==
+                                                                    "visiteurs_debut" and e["data"]["nom"] == "Papa"])
+            r = await w.ok({"type": "visiteurs/sejour", "visite": mamie["id"], "fin": local(demain10)})
+            check("« dort ici » refusé pour une visite simple (utiliser Modifier)", r["ok"] is False, str(r))
+        async with WS(s, st["tabsalon"]) as w:
+            r = await w.ok({"type": "code_pin/executer", "entity_id": "cover.porte_banc", "action": "fermer",
+                            "personne": "visiteur", "code": papa["code"]})
+            check("papa dort ici : même code", r["ok"], str(r))
+        start = (datetime.utcnow() - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        end = (datetime.utcnow() + timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        async with s.get(f"{BASE}/api/calendars/{AG}?start={start}&end={end}",
+                         headers={"Authorization": f"Bearer {A}"}) as r:
+            evs = [e for e in await r.json() if e["summary"] == "Papa (dort ici)"]
+        check("agenda : la nuit de papa", len(evs) == 1, str(evs))
+        async with WS(s, A) as w:
+            r = await w.ok({"type": "visiteurs/sejour", "visite": papa["id"], "retirer": True})
+            pv = r.get("visite", {})
+            check("nuit annulée : de nouveau de passage jusqu'à la fin du créneau", r["ok"] and pv["type"] == "passage"
+                  and not pv["sejours"] and datetime.fromisoformat(pv["fin"]).astimezone().strftime("%H:%M") ==
+                  t1.strftime("%H:%M"), str(r))
+            soir = (datetime.now() + timedelta(days=1)).replace(hour=20, minute=0, second=0, microsecond=0)
+        code, body = await svc(s, st["julie"], "visiteurs", "sejour", {
+            "id": papa["id"], "debut": local(soir), "fin": local(soir + timedelta(hours=13))})
+        async with WS(s, A) as w:
+            info = await w.ok({"type": "visiteurs/info"})
+            pv = next(v for v in info["visites"] if v["id"] == papa["id"])
+            check("nuit prévue demain soir (action, Julie) : passage du jour inchangé", code == 200 and
+                  len(pv["sejours"]) == 1 and pv["type"] == "passage" and pv["statut"] == "en_cours", f"{code} {pv}")
+            rid = "S" + soir.strftime("%Y%m%dT%H%M%S")
+            r = await w.call({"type": "calendar/event/delete", "entity_id": AG, "uid": papa["id"], "recurrence_id": rid})
+            info = await w.ok({"type": "visiteurs/info"})
+            pv = next(v for v in info["visites"] if v["id"] == papa["id"])
+            check("agenda : supprimer la nuit l'annule (la série reste)", r.get("success") and not pv["sejours"] and
+                  pv.get("recurrence"), f"{r} {pv}")
+            await w.ok({"type": "visiteurs/supprimer", "visite": papa["id"]})
         # ───────── réglages depuis le tableau de bord (1.1) ─────────
         async with WS(s, st["julie"]) as w:
             r = await w.ok({"type": "visiteurs/reglages"})

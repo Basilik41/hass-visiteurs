@@ -265,8 +265,12 @@ class Visiteurs:
         v = self.eff(v)
         out = {k: v.get(k) for k in ("id", "nom", "type", "debut", "fin", "plaques", "telephone", "note", "acces",
                                      "alarme", "arrivee", "terminee", "creee_par", "creee_le", "immediate",
-                                     "recurrence", "serie_debut", "serie_fin")}
+                                     "recurrence", "serie_debut", "serie_fin", "type_serie")}
         out["sauf"] = list(v.get("sauf") or [])
+        now = self.now()
+        out["sejours"] = [{"debut": x.get("debut"), "fin": x.get("fin")} for x in v.get("sejours") or []
+                          if (parse_dt(x.get("fin")) or now) > now]
+        out["dort_ici"] = bool(v.get("dort_ici"))
         out["statut"] = statut(v, self.now(), self.avant, self.apres)
         out["a_un_code"] = bool(v.get("code"))
         if admin:
@@ -508,6 +512,53 @@ class Visiteurs:
         sauf = sorted(set(v.get("sauf") or []) | {d.isoformat()})
         v["sauf"] = sauf[-SAUF_MAX:]
         v["modifiee_par"], v["modifiee_le"] = who, self.now().isoformat()
+        await self._changed(v)
+        return v
+
+    async def add_stay(self, vid: str, who: str, fin: Any, debut: Any = None) -> dict:
+        """Visite régulière : il reste dormir (« reste sur place » jusqu'à `fin`, avec le même code et les mêmes
+        accès). Début par défaut : le passage en cours, sinon maintenant."""
+        v = self._get(vid)
+        if not v.get("recurrence"):
+            raise VisiteError("repetition", "Visite simple : la passer en « reste sur place » avec « Modifier ».")
+        now = self.now()
+        d = parse_dt(_to_iso(debut)) if debut else None
+        if debut and d is None:
+            raise VisiteError("debut", "Heure d'arrivée invalide.")
+        if d is None:
+            cur = self.eff(v)
+            d = parse_dt(cur["debut"]) if statut(cur, now, self.avant, self.apres) == EN_COURS else now
+        f = parse_dt(_to_iso(fin)) if fin else None
+        if f is None:
+            raise VisiteError("fin", "Indiquer jusqu'à quand il reste.")
+        if f <= max(d, now):
+            raise VisiteError("fin", "Le départ doit être après l'arrivée (et pas déjà passé).")
+        if f - d > timedelta(days=31):
+            raise VisiteError("fin", "Une nuit sur place dure au plus 31 jours.")
+        sej = [x for x in v.get("sejours") or [] if (parse_dt(x.get("fin")) or now) > now]
+        sej.append({"debut": dt_util.as_utc(d).isoformat(), "fin": dt_util.as_utc(f).isoformat(), "par": who})
+        v["sejours"] = sorted(sej, key=lambda x: x["debut"])[-SAUF_MAX:]
+        v["modifiee_par"], v["modifiee_le"] = who, now.isoformat()
+        await self._changed(v)
+        return v
+
+    async def remove_stays(self, vid: str, who: str, debut: Any = None) -> dict:
+        """Annule les nuits sur place à venir ou en cours (ou celle qui commence à `debut`)."""
+        v = self._get(vid)
+        d = parse_dt(_to_iso(debut)) if debut else None
+        now = self.now()
+        keep = []
+        for x in v.get("sejours") or []:
+            xd, xf = parse_dt(x.get("debut")), parse_dt(x.get("fin"))
+            if xf is None or xf <= now:
+                continue  # passée : oubliée
+            if d is None or (xd and abs((xd - d).total_seconds()) < 60):
+                continue  # annulée
+            keep.append(x)
+        if len(keep) == len([x for x in v.get("sejours") or [] if (parse_dt(x.get("fin")) or now) > now]):
+            raise VisiteError("sejour", "Aucune nuit sur place à annuler.")
+        v["sejours"] = keep
+        v["modifiee_par"], v["modifiee_le"] = who, now.isoformat()
         await self._changed(v)
         return v
 

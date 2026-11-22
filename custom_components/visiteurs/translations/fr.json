@@ -291,6 +291,28 @@
           "description": "Jour du passage à sauter (vide : en cours ou prochain)."
         }
       }
+    },
+    "sejour": {
+      "name": "Il reste dormir",
+      "description": "Visite régulière : ajoute une nuit (ou plus) sur place — la visite compte alors comme « reste sur place », avec le même code et les mêmes accès. « Retirer » annule les nuits prévues.",
+      "fields": {
+        "id": {
+          "name": "Visite",
+          "description": "Identifiant de la visite régulière."
+        },
+        "debut": {
+          "name": "À partir de",
+          "description": "Vide : le passage en cours, sinon maintenant."
+        },
+        "fin": {
+          "name": "Jusqu'à",
+          "description": "Heure de départ (ex. demain 10 h)."
+        },
+        "retirer": {
+          "name": "Retirer",
+          "description": "Annule les nuits sur place (toutes, ou celle qui commence à « À partir de »)."
+        }
+      }
     }
   }
 }

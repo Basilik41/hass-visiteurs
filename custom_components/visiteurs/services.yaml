@@ -66,6 +66,12 @@ terminer:
 supprimer:
   fields:
     id: {required: true, selector: {text: {}}}
+sejour:
+  fields:
+    id: {required: true, selector: {text: {}}}
+    debut: {selector: {datetime: {}}}
+    fin: {selector: {datetime: {}}}
+    retirer: {selector: {boolean: {}}}
 sauter:
   fields:
     id: {required: true, selector: {text: {}}}

@@ -4,6 +4,7 @@ Gère les visiteurs simplement, depuis le téléphone, la tablette ou l'agenda :
 
 - **Deux types de visite** : *reste sur place* (famille, amis qui dorment ou gardent la maison : comptent comme une présence) et *passage* (artisan, livreur, voisin qui nourrit les animaux).
 - **Passages réguliers** (femme de ménage, maréchal-ferrant, voisin qui nourrit les animaux…) : jours de la semaine, horaires, chaque semaine ou une sur deux / trois / quatre, sur une période (un an par défaut, deux au plus). Chaque passage commence et finit tout seul ; le code ne marche que pendant les passages ; « Pas cette fois » saute un passage, « Parti·e » arrête celui en cours.
+- **« Dort ici »** : un visiteur de passage reste dormir (une nuit ou plus) — il compte alors comme « reste sur place », avec le même code et les mêmes accès ; ses passages habituels reprennent ensuite. « Annuler la nuit » revient en arrière.
 - **Visite prévue ou « là maintenant »**. Début et fin automatiques à l'heure près, avec une marge réglable avant et après.
 - **Code visiteur temporaire** (module *Codes d'accès* ≥ 1.1) : sur les tablettes murales (bouton 🔑 « Visiteur »), seulement pendant la visite, seulement pour les accès cochés. Un code visiteur ne désarme jamais l'alarme, sauf si on coche « peut désarmer » pour cette visite. Chaque usage est signalé. 5 codes faux : codes visiteur bloqués (5 min, puis plus).
 - **Message d'accueil** prêt à envoyer (SMS, copier, partager) : dates, code et ce qu'il ouvre, Wi-Fi invité, consignes.
@@ -26,9 +27,9 @@ Gère les visiteurs simplement, depuis le téléphone, la tablette ou l'agenda :
 
 ## Actions
 
-`visiteurs.ajouter` (réponse : `id`, `code`, `message`), `visiteurs.modifier`, `visiteurs.terminer`, `visiteurs.supprimer`, `visiteurs.sauter`, `visiteurs.arrivee`, `visiteurs.reconnaitre_plaque` (réponse : `trouve`, `nom`, `type`, `id`).
+`visiteurs.ajouter` (réponse : `id`, `code`, `message`), `visiteurs.modifier`, `visiteurs.terminer`, `visiteurs.supprimer`, `visiteurs.sauter`, `visiteurs.sejour`, `visiteurs.arrivee`, `visiteurs.reconnaitre_plaque` (réponse : `trouve`, `nom`, `type`, `id`).
 
-Passages réguliers : `repetition_jours` (lundi … dimanche), `heure_debut`, `heure_fin` (une fin avant le début = jusqu'au lendemain), `toutes_les` (semaines, 1 à 12), `debut` (premier jour) et `jusqu_au` (dernier jour). `repetition_jours: []` dans `modifier` en refait une visite simple. `terminer` arrête le passage en cours (ou toute la série hors passage) ; `sauter` annule un passage (par défaut le prochain) ; `supprimer` efface tous les passages.
+Passages réguliers : `repetition_jours` (lundi … dimanche), `heure_debut`, `heure_fin` (une fin avant le début = jusqu'au lendemain), `toutes_les` (semaines, 1 à 12), `debut` (premier jour) et `jusqu_au` (dernier jour). `repetition_jours: []` dans `modifier` en refait une visite simple. `terminer` arrête le passage en cours (ou toute la série hors passage) ; `sauter` annule un passage (par défaut le prochain) ; `sejour` (`fin`, `debut` facultatif, ou `retirer: true`) ajoute ou annule une nuit sur place ; `supprimer` efface tous les passages. Une visite simple de passage qui reste dormir : `modifier` avec `type: sur_place` et un nouveau départ.
 
 Agenda : les passages s'y affichent comme une série « chaque semaine » ; on peut en créer une depuis l'agenda (répétition hebdomadaire), supprimer un passage ou « ce passage et les suivants ».
 
@@ -66,4 +67,4 @@ Ils ne changent rien seuls : ce sont vos automatisations qui les lisent. Réserv
 
 ## Tests
 
-`tests/test_visites.py` (fonctions pures, 15), `tests/bench_visiteurs.py` (79 contrôles + 3 après redémarrage sur un vrai Home Assistant avec *Codes d'accès* 1.1), `tests/card_test.py` (36 contrôles dans Chromium : ordinateur, téléphone 380 px, tablette).
+`tests/test_visites.py` (fonctions pures, 16), `tests/bench_visiteurs.py` (89 contrôles + 3 après redémarrage sur un vrai Home Assistant avec *Codes d'accès* 1.1), `tests/card_test.py` (41 contrôles dans Chromium : ordinateur, téléphone 380 px, tablette).
