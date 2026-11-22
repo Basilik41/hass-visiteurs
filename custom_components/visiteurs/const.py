@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 DOMAIN = "visiteurs"
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 
 CARD_URL = f"/{DOMAIN}/visiteurs-card.js"
 STORE_KEY = f"{DOMAIN}.visites"
@@ -34,7 +34,19 @@ CONF_TABLET = "motif_tablette"
 DEFAULT_TABLET = "TabDomo"
 CONF_NIVEAU = "niveau"                # niveau de script.notifier : info | alerte | admin
 
+# comportements lus par les automatisations (interrupteurs du module, réglables depuis le tableau de bord)
+REGLES = {
+    "regle_armement": ("Suspendre l'armement automatique pendant une visite", "mdi:shield-off-outline"),
+    "regle_presence": ("Un invité sur place compte comme quelqu'un à la maison", "mdi:home-account"),
+    "regle_passage_info": ("Passage de jour : personne détectée = simple info", "mdi:cctv"),
+    "regle_alerte_nuit": ("La nuit, personne détectée = alerte même en visite", "mdi:weather-night"),
+}
+
 DEFAULTS = {
+    "regle_armement": True,
+    "regle_presence": True,
+    "regle_passage_info": True,
+    "regle_alerte_nuit": True,
     CONF_MARGE_AVANT: 30,
     CONF_MARGE_APRES: 30,
     CONF_DUREE_PASSAGE: 2,

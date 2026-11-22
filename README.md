@@ -37,9 +37,20 @@ mode: auto        # auto : tablette murale → accueil, sinon gestion ; ou gesti
 title: Visiteurs
 ```
 
-## Réglages (options de l'intégration)
+## Réglages
 
-Accès qu'un code peut ouvrir, Wi-Fi invité (nom, mot de passe, sécurité), consignes, lumière d'accueil, durées par défaut (passage 2 h, séjour 24 h), marges (30 min), plage de nuit (22 h – 6 h), qui prévenir et de quoi, qui peut gérer.
+Depuis la carte (bouton ⚙️, administrateurs) ou les options de l'intégration : Wi-Fi invité (nom, mot de passe avec 🎲 générer, sécurité), consignes, lumière d'accueil, accès qu'un code peut ouvrir (on coche ensuite visite par visite), comportement pendant une visite, plage de nuit (22 h – 6 h), durées par défaut (passage 2 h, séjour 24 h), marges (30 min), qui prévenir et de quoi. Qui peut gérer les visites : options de l'intégration.
+
+### Comportement pendant une visite (interrupteurs, lus par vos automatisations)
+
+| Interrupteur | Par défaut |
+|---|---|
+| `switch.visiteurs_pause_armement_auto` — armement automatique suspendu pendant une visite | activé |
+| `switch.visiteurs_invite_compte_present` — un invité sur place compte comme quelqu'un à la maison | activé |
+| `switch.visiteurs_passage_en_simple_info` — passage de jour : personne détectée = simple info | activé |
+| `switch.visiteurs_alerte_de_nuit_maintenue` — la nuit, personne détectée = alerte même en visite | activé |
+
+Ils ne changent rien seuls : ce sont vos automatisations qui les lisent. Réservés aux administrateurs (un autre compte est refusé, même par l'API).
 
 ## Limites
 
@@ -49,4 +60,4 @@ Accès qu'un code peut ouvrir, Wi-Fi invité (nom, mot de passe, sécurité), co
 
 ## Tests
 
-`tests/test_visites.py` (fonctions pures, 10), `tests/bench_visiteurs.py` (45 contrôles + 2 après redémarrage sur un vrai Home Assistant avec *Codes d'accès* 1.1), `tests/card_test.py` (23 contrôles dans Chromium : ordinateur, téléphone 380 px, tablette).
+`tests/test_visites.py` (fonctions pures, 11), `tests/bench_visiteurs.py` (58 contrôles + 2 après redémarrage sur un vrai Home Assistant avec *Codes d'accès* 1.1), `tests/card_test.py` (26 contrôles dans Chromium : ordinateur, téléphone 380 px, tablette).

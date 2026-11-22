@@ -72,6 +72,20 @@
       "agenda": {
         "name": "Visiteurs"
       }
+    },
+    "switch": {
+      "regle_armement": {
+        "name": "Pause armement auto"
+      },
+      "regle_presence": {
+        "name": "Invité compte présent"
+      },
+      "regle_passage_info": {
+        "name": "Passage en simple info"
+      },
+      "regle_alerte_nuit": {
+        "name": "Alerte de nuit maintenue"
+      }
     }
   },
   "exceptions": {},

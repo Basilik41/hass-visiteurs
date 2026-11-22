@@ -3,7 +3,7 @@
  *   mode: auto | gestion | accueil     (auto : tablette murale → accueil ; sinon gestion)
  *   title: Visiteurs
  */
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
 const QR = (() => {
 /* QR Code Generator for JavaScript — Copyright (c) 2009 Kazuhiko Arase — MIT license */
 const define = undefined, exports = undefined, module = undefined;
@@ -2450,12 +2450,12 @@ class VisiteursCard extends HTMLElement {
     // rechargé quand une entité du module change (début, fin, arrivée…)
     const sig = Object.keys(h.states).filter((e) => /^(sensor|binary_sensor)\..*visit/.test(e))
       .map((e) => h.states[e].last_updated).join("|");
-    if (sig !== this._sig) { const had = this._sig !== undefined; this._sig = sig; if (had) this._load(); }
+    if (sig !== this._sig) { const had = this._sig !== undefined; this._sig = sig; if (had && !this.reg && !this.form) this._load(); }
   }
 
   connectedCallback() {
     clearInterval(this._timer);
-    this._timer = setInterval(() => { if (!this.form) this._load(); }, 60000);
+    this._timer = setInterval(() => { if (!this.form && !this.reg) this._load(); }, 60000);
   }
   disconnectedCallback() { clearInterval(this._timer); }
 
@@ -2489,7 +2489,7 @@ class VisiteursCard extends HTMLElement {
     if (this._err) body = `<p class="err">${esc(this._err)}</p>`;
     else if (!this.info) body = `<p class="vide">Chargement…</p>`;
     else body = this.mode === "accueil" ? this._accueil() : this._gestion();
-    this.shadowRoot.innerHTML = `<style>${CSS}</style><ha-card>${body}</ha-card>${this.form ? this._formHtml() : ""}${this.result ? this._resultHtml() : ""}`;
+    this.shadowRoot.innerHTML = `<style>${CSS}</style><ha-card>${body}</ha-card>${this.form ? this._formHtml() : ""}${this.result ? this._resultHtml() : ""}${this.reg ? this._regHtml() : ""}`;
     this._bind();
   }
 
@@ -2515,6 +2515,7 @@ class VisiteursCard extends HTMLElement {
     const by = (s) => i.visites.filter((v) => v.statut === s);
     const cur = by("en_cours"), next = by("prevue"), done = by("terminee");
     return `<div class="tete"><h2>${esc(this.config.title)}</h2>
+        ${i.admin ? `<button data-a="reglages" aria-label="Réglages des visiteurs" title="Réglages">⚙️</button>` : ""}
         ${i.gestion ? `<button class="p" data-a="nouveau">＋ Visiteur</button>` : ""}</div>
       ${cur.length ? `<h3>En ce moment</h3>${cur.map((v) => this._item(v)).join("")}` : `<p class="vide">Aucun visiteur en ce moment.</p>`}
       ${next.length ? `<h3>À venir</h3>${next.map((v) => this._item(v)).join("")}` : ""}
@@ -2606,6 +2607,90 @@ class VisiteursCard extends HTMLElement {
     </div></div>`;
   }
 
+  // ───────── réglages (administrateurs) ─────────
+  _regHtml() {
+    const r = this.reg, v = r.v;
+    if (!r.data) return `<div class="fond"><div class="boite"><p>Chargement…</p></div></div>`;
+    const d = r.data;
+    const num = (k, lab, unit, min, max, step) => `<label class="c" for="r_${k}">${lab}</label>
+      <div style="display:flex;align-items:center;gap:8px"><input id="r_${k}" data-r="${k}" type="number" min="${min}" max="${max}" step="${step}" value="${esc(v[k])}" style="width:110px;padding:10px;border-radius:10px;border:1px solid var(--divider-color,#ccc);font:inherit;background:var(--card-background-color,#fff);color:inherit"> ${unit}</div>`;
+    const sel = (k, opts) => `<div class="seg">${opts.map(([val, lab]) => `<button data-rs="${k}" data-v="${esc(val)}" class="${String(v[k]) === String(val) ? "on" : ""}">${esc(lab)}</button>`).join("")}</div>`;
+    const timeIn = (k) => `<input data-r="${k}" type="time" value="${esc(String(v[k] || "").slice(0, 5))}" style="padding:10px;border-radius:10px;border:1px solid var(--divider-color,#ccc);font:inherit;background:var(--card-background-color,#fff);color:inherit">`;
+    return `<div class="fond"><div class="boite" role="dialog" aria-modal="true" aria-labelledby="rgt">
+      <h2 id="rgt">Réglages des visiteurs — ${esc(this.info.site || "")}</h2>
+      ${r.err ? `<p class="err" role="alert">${esc(r.err)}</p>` : ""}
+      <h3>Wi-Fi invité</h3>
+      <label class="c" for="r_ssid">Nom du réseau</label><input id="r_ssid" data-r="wifi_ssid" type="text" maxlength="32" value="${esc(v.wifi_ssid || "")}" placeholder="ex. Les Roches Invités">
+      <label class="c" for="r_mdp">Mot de passe</label>
+      <div style="display:flex;gap:6px"><input id="r_mdp" data-r="wifi_mot_de_passe" type="text" maxlength="63" value="${esc(v.wifi_mot_de_passe || "")}" autocomplete="off" spellcheck="false" style="flex:1"><button data-a="r_gen">🎲 Générer</button></div>
+      <label class="c">Sécurité</label>${sel("wifi_securite", [["WPA", "WPA2"], ["SAE", "WPA3"], ["nopass", "Ouvert"]])}
+      <div class="res">Le réseau se crée dans UniFi avec ce nom et ce mot de passe. Ici, ils servent au QR code de la tablette et au message d'accueil.</div>
+      <h3>Accueil</h3>
+      <label class="c" for="r_cons">Consignes</label><textarea id="r_cons" data-r="consignes" maxlength="2000" placeholder="ex. Fermer le portail derrière vous. Les chiens ne doivent pas sortir.">${esc(v.consignes || "")}</textarea>
+      <label class="c" for="r_lum">Lumière d'accueil (allumée au début d'une visite s'il fait nuit)</label>
+      <select id="r_lum" data-r="lumiere_accueil" style="width:100%;padding:10px;border-radius:10px;font:inherit;border:1px solid var(--divider-color,#ccc);background:var(--card-background-color,#fff);color:inherit">
+        <option value="">Aucune</option>${d.lumieres_possibles.map((l) => `<option value="${esc(l.entity_id)}" ${v.lumiere_accueil === l.entity_id ? "selected" : ""}>${esc(l.nom)}</option>`).join("")}</select>
+      <h3>Accès qu'on peut donner avec un code visiteur</h3>
+      <div class="res">Pour chaque visite, on coche ensuite seulement ceux qu'on veut.</div>
+      ${d.acces_possibles.map((a) => `<label class="chk"><input type="checkbox" data-racc="${esc(a.entity_id)}" ${(v.acces_proposes || []).includes(a.entity_id) ? "checked" : ""}> ${esc(a.nom)}${a.alarme ? " (alarme)" : ""}</label>`).join("") || `<p class="vide">Aucune porte, serrure ou alarme trouvée.</p>`}
+      <h3>Comportement pendant une visite</h3>
+      ${Object.entries(d.regles).map(([k, lab]) => `<label class="chk"><input type="checkbox" data-rb="${k}" ${v[k] !== false ? "checked" : ""}> ${esc(lab)}</label>`).join("")}
+      <label class="c">Nuit (de … à …)</label><div style="display:flex;gap:8px;align-items:center">${timeIn("nuit_debut")} → ${timeIn("nuit_fin")}</div>
+      <h3>Durées</h3>
+      ${num("duree_passage_h", "Passage, par défaut", "h", 0.25, 24, 0.25)}
+      ${num("duree_sur_place_h", "Séjour sur place, par défaut", "h", 1, 720, 1)}
+      ${num("marge_avant_min", "Marge avant l'arrivée prévue", "min", 0, 240, 5)}
+      ${num("marge_apres_min", "Marge après le départ prévu", "min", 0, 240, 5)}
+      <h3>Notifications</h3>
+      <label class="c">Prévenir de</label>${sel("prevenir", [["tout", "Tout"], ["arrivee_depart", "Arrivées, codes, fins"], ["codes", "Codes seulement"], ["rien", "Rien"]])}
+      <label class="c">Qui</label>${sel("niveau", [["alerte", "Richard et Julie"], ["admin", "Administrateurs"], ["info", "Discord seulement"]])}
+      <div class="pied"><button data-a="r_annuler">Annuler</button><button class="p" data-a="r_enregistrer" ${r.busy ? "disabled" : ""}>Enregistrer</button></div>
+    </div></div>`;
+  }
+
+  _readReg() {
+    const R = this.shadowRoot, v = this.reg?.v;
+    if (!v) return;
+    R.querySelectorAll("[data-r]").forEach((el) => { v[el.dataset.r] = el.type === "number" ? Number(el.value) : el.value; });
+    R.querySelectorAll("[data-rb]").forEach((el) => { v[el.dataset.rb] = el.checked; });
+    const acc = [];
+    R.querySelectorAll("[data-racc]").forEach((el) => { if (el.checked) acc.push(el.dataset.racc); });
+    if (R.querySelector("[data-racc]")) v.acces_proposes = acc;
+  }
+
+  async _openReg() {
+    this.reg = { v: {}, data: null, err: "", busy: false };
+    this._render();
+    try {
+      const r = await this._ws({ type: "visiteurs/reglages" });
+      if (!r.ok) { this.reg = null; this._toast(r.message); return this._render(); }
+      this.reg.data = r; this.reg.v = { ...r.valeurs };
+    } catch (e) { this.reg = null; this._toast(e?.message || String(e)); }
+    this._render();
+  }
+
+  async _saveReg(gen) {
+    this._readReg();
+    const v = this.reg.v;
+    const msg = { type: "visiteurs/regler" };
+    for (const [k, val] of Object.entries(v)) {
+      if (val === null || val === undefined) continue;
+      if (k === "nuit_debut" || k === "nuit_fin") { if (/^\d{2}:\d{2}/.test(val)) msg[k] = val.slice(0, 5) + ":00"; continue; }
+      msg[k] = val;
+    }
+    if (gen) msg.wifi_generer = true;
+    this.reg.busy = true; this.reg.err = ""; this._render();
+    try {
+      const r = await this._ws(msg);
+      this.reg.busy = false;
+      if (!r.ok) { this.reg.err = r.message; return this._render(); }
+      if (gen) { this.reg.data = r; this.reg.v.wifi_mot_de_passe = r.valeurs.wifi_mot_de_passe; this._toast("Nouveau mot de passe enregistré"); }
+      else { this.reg = null; this._toast("Réglages enregistrés"); }
+      await this._load();
+    } catch (e) { this.reg.busy = false; this.reg.err = e?.message || String(e); }
+    this._render();
+  }
+
   _resultHtml() {
     const r = this.result;
     const sms = r.telephone ? `sms:${encodeURIComponent(r.telephone.replace(/[^\d+]/g, ""))}?body=${encodeURIComponent(r.message)}` : "";
@@ -2660,6 +2745,9 @@ class VisiteursCard extends HTMLElement {
       R.querySelector(".fond")?.addEventListener("click", (e) => { if (e.target.classList.contains("fond") && !this.form.busy) { this.form = null; this._render(); } });
       if (!this._focused) { R.getElementById("nom")?.focus(); this._focused = true; }
     }
+    if (this.reg) {
+      R.querySelectorAll("[data-rs]").forEach((b) => b.addEventListener("click", () => { this._readReg(); this.reg.v[b.dataset.rs] = b.dataset.v; this._render(); }));
+    }
     if (this.result) R.querySelector(".fond")?.addEventListener("click", (e) => { if (e.target.classList.contains("fond")) { this.result = null; this._render(); } });
   }
 
@@ -2667,6 +2755,10 @@ class VisiteursCard extends HTMLElement {
     const v = id ? this.info.visites.find((x) => x.id === id) : null;
     if (a !== "terminer" && a !== "supprimer") this.sure = null;
     switch (a) {
+      case "reglages": return this._openReg();
+      case "r_annuler": this.reg = null; break;
+      case "r_enregistrer": return this._saveReg(false);
+      case "r_gen": return this._saveReg(true);
       case "nouveau": this.form = this._newForm(null); this._wasCoded = false; this._focused = false; break;
       case "modifier": this.form = this._newForm(v); this._wasCoded = !!v?.a_un_code; this._focused = false; break;
       case "annuler": this.form = null; break;

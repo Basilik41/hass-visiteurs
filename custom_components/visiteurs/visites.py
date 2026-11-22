@@ -244,3 +244,11 @@ def in_night(local: datetime, start: str, end: str) -> bool:
     if a == b:
         return False
     return a <= t < b if a < b else (t >= a or t < b)
+
+
+_WIFI_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"  # sans l, i, o, 0, 1 (faciles à confondre en dictant)
+
+
+def generate_wifi_password(groups: int = 3, size: int = 4) -> str:
+    """« k7mq-3hzt-p9wa » : 60 bits d'aléa, facile à dicter ou recopier."""
+    return "-".join("".join(secrets.choice(_WIFI_ALPHABET) for _ in range(size)) for _ in range(groups))

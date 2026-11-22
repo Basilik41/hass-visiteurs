@@ -13,7 +13,19 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_ACCES,
     CONF_CONSIGNES,
+    CONF_LUMIERE,
+    CONF_MARGE_APRES,
+    CONF_MARGE_AVANT,
+    CONF_NIVEAU,
+    CONF_NUIT_DEBUT,
+    CONF_NUIT_FIN,
+    CONF_PREVENIR,
+    CONF_WIFI_MDP,
+    CONF_WIFI_SECU,
+    CONF_WIFI_SSID,
+    REGLES,
     CONF_DUREE_PASSAGE,
     CONF_DUREE_SUR_PLACE,
     CONF_GESTION,
@@ -24,7 +36,7 @@ from .const import (
     VERSION,
 )
 from .manager import VisiteError, Visiteurs
-from .visites import parse_dt
+from .visites import generate_wifi_password, parse_dt
 
 _CODE = vol.Any(cv.boolean, vol.All(cv.string, vol.Match(r"^(\d{4,8}|nouveau|garder|aucun)$")))
 _FIELDS = {
@@ -160,7 +172,7 @@ def _handler(manage: bool = False) -> Callable:
 
 @callback
 def async_register_ws(hass: HomeAssistant) -> None:
-    for cmd in (ws_info, ws_ajouter, ws_modifier, ws_terminer, ws_supprimer, ws_message):
+    for cmd in (ws_info, ws_ajouter, ws_modifier, ws_terminer, ws_supprimer, ws_message, ws_reglages, ws_regler):
         websocket_api.async_register_command(hass, cmd)
 
 
@@ -187,7 +199,7 @@ async def ws_info(hass: HomeAssistant, conn: websocket_api.ActiveConnection, msg
         "version": VERSION, "gestion": manage, "site": hass.config.location_name, "visites": rows,
         "acces": m.access_choices() if manage else [], "wifi": m.wifi(), "consignes": m.o.get(CONF_CONSIGNES) or "",
         "durees": {"passage": m.o.get(CONF_DUREE_PASSAGE), "sur_place": m.o.get(CONF_DUREE_SUR_PLACE)},
-        "nuit": m.is_night(), "maintenant": dt_util.utcnow().isoformat(),
+        "nuit": m.is_night(), "maintenant": dt_util.utcnow().isoformat(), "admin": _is_admin(conn.user),
     }
 
 
@@ -239,3 +251,75 @@ async def ws_supprimer(hass: HomeAssistant, conn: websocket_api.ActiveConnection
 async def ws_message(hass: HomeAssistant, conn: websocket_api.ActiveConnection, msg: dict, m: Visiteurs) -> dict:
     return {"message": m.message(msg["visite"])}
 
+
+
+# ───────── réglages (administrateurs) ─────────
+def _is_admin(user: User | None) -> bool:
+    return user is None or user.is_admin
+
+
+_HHMM = vol.All(cv.string, vol.Match(r"^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$"))
+REGLAGES = {
+    vol.Optional(CONF_WIFI_SSID): vol.All(cv.string, vol.Length(max=32)),
+    vol.Optional(CONF_WIFI_MDP): vol.All(cv.string, vol.Length(max=63)),
+    vol.Optional(CONF_WIFI_SECU): vol.In(["WPA", "SAE", "nopass"]),
+    vol.Optional("wifi_generer"): cv.boolean,
+    vol.Optional(CONF_CONSIGNES): vol.All(cv.string, vol.Length(max=2000)),
+    vol.Optional(CONF_ACCES): vol.All(cv.ensure_list, [cv.entity_id]),
+    vol.Optional(CONF_LUMIERE): vol.Any("", cv.entity_id),
+    vol.Optional(CONF_DUREE_PASSAGE): vol.All(vol.Coerce(float), vol.Range(min=0.25, max=24)),
+    vol.Optional(CONF_DUREE_SUR_PLACE): vol.All(vol.Coerce(float), vol.Range(min=1, max=720)),
+    vol.Optional(CONF_MARGE_AVANT): vol.All(vol.Coerce(int), vol.Range(min=0, max=240)),
+    vol.Optional(CONF_MARGE_APRES): vol.All(vol.Coerce(int), vol.Range(min=0, max=240)),
+    vol.Optional(CONF_NUIT_DEBUT): _HHMM,
+    vol.Optional(CONF_NUIT_FIN): _HHMM,
+    vol.Optional(CONF_PREVENIR): vol.In(["tout", "arrivee_depart", "codes", "rien"]),
+    vol.Optional(CONF_NIVEAU): vol.In(["alerte", "admin", "info"]),
+    **{vol.Optional(k): cv.boolean for k in REGLES},
+}
+_ACCESS_DOMAINS = ("cover", "lock", "alarm_control_panel")
+
+
+def _reglages(hass: HomeAssistant, m: Visiteurs) -> dict:
+    keys = [str(k) for k in REGLAGES if str(k) != "wifi_generer"]
+    current = {k: m.o.get(k) for k in keys}
+    chosen = set(m.o.get(CONF_ACCES) or [])
+    cands = sorted({s.entity_id for s in hass.states.async_all(_ACCESS_DOMAINS)} | chosen)
+    lights = sorted({s.entity_id for s in hass.states.async_all("light")}
+                    | ({m.o[CONF_LUMIERE]} if m.o.get(CONF_LUMIERE) else set()))
+    return {
+        "valeurs": current,
+        "regles": {k: label for k, (label, _icon) in REGLES.items()},
+        "acces_possibles": [{"entity_id": e, "nom": m._access_name(e), "alarme": e.startswith("alarm_control_panel.")}
+                            for e in cands],
+        "lumieres_possibles": [{"entity_id": e, "nom": m._access_name(e)} for e in lights],
+    }
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/reglages"})
+@websocket_api.async_response
+@_handler()
+async def ws_reglages(hass: HomeAssistant, conn: websocket_api.ActiveConnection, msg: dict, m: Visiteurs) -> dict:
+    if not _is_admin(conn.user):
+        raise VisiteError("admin", "Réservé aux administrateurs.")
+    return _reglages(hass, m)
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/regler", **REGLAGES})
+@websocket_api.async_response
+@_handler()
+async def ws_regler(hass: HomeAssistant, conn: websocket_api.ActiveConnection, msg: dict, m: Visiteurs) -> dict:
+    if not _is_admin(conn.user):
+        raise VisiteError("admin", "Réservé aux administrateurs.")
+    data = {k: v for k, v in msg.items() if k not in ("type", "id")}
+    if data.pop("wifi_generer", False):
+        data[CONF_WIFI_MDP] = generate_wifi_password()
+    secu = data.get(CONF_WIFI_SECU, m.o.get(CONF_WIFI_SECU))
+    pwd = data.get(CONF_WIFI_MDP, m.o.get(CONF_WIFI_MDP)) or ""
+    if secu != "nopass" and pwd and not 8 <= len(pwd) <= 63:
+        raise VisiteError("wifi", "Mot de passe Wi-Fi : 8 à 63 caractères.")
+    bad = [e for e in data.get(CONF_ACCES, []) if hass.states.get(e) is None]
+    if bad:
+        raise VisiteError("acces", "Entité introuvable : " + ", ".join(bad))
+    await m.apply_settings(data)
+    return _reglages(hass, m)

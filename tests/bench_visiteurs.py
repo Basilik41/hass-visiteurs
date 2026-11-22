@@ -361,6 +361,60 @@ async def main() -> None:
         async with WS(s, A) as w:
             r = await w.ok({"type": "code_pin/debloquer", "personne": "visiteur", "code_admin": "482917"})
             check("déblocage par un admin", r["ok"], str(r))
+        # ───────── réglages depuis le tableau de bord (1.1) ─────────
+        async with WS(s, st["julie"]) as w:
+            r = await w.ok({"type": "visiteurs/reglages"})
+            check("réglages : refusés à Julie (non admin)", r["ok"] is False and r["erreur"] == "admin", str(r))
+        async with WS(s, A) as w:
+            await w.ok({"type": "subscribe_events", "event_type": "visiteurs_debut"})
+            r = await w.ok({"type": "visiteurs/reglages"})
+            check("réglages : lecture admin", r["ok"] and "regle_armement" in r["regles"] and any(
+                a["entity_id"] == "cover.porte_banc" for a in r["acces_possibles"]), str(r)[:300])
+            r = await w.ok({"type": "visiteurs/regler", "wifi_ssid": "Les Roches Invités", "wifi_generer": True})
+            import re as _re
+            pwd = r.get("valeurs", {}).get("wifi_mot_de_passe", "")
+            check("Wi-Fi : mot de passe généré", r["ok"] and _re.fullmatch(r"[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}", pwd),
+                  str(r)[:300])
+            r = await w.ok({"type": "visiteurs/regler", "wifi_mot_de_passe": "court"})
+            check("Wi-Fi : mot de passe trop court refusé", r["ok"] is False and r["erreur"] == "wifi", str(r))
+            r = await w.ok({"type": "visiteurs/regler", "wifi_securite": "nopass"})
+            info = await w.ok({"type": "visiteurs/info"})
+            check("Wi-Fi ouvert : QR sans mot de passe", info["wifi"]["qr"] == "WIFI:T:nopass;S:Les Roches Invités;;",
+                  info["wifi"]["qr"])
+            await w.ok({"type": "visiteurs/regler", "wifi_securite": "WPA"})
+            info = await w.ok({"type": "visiteurs/info"})
+            check("Wi-Fi : QR mis à jour", info["wifi"]["qr"] == f"WIFI:T:WPA;S:Les Roches Invités;P:{pwd};;",
+                  info["wifi"]["qr"])
+            r = await w.ok({"type": "visiteurs/regler", "acces_proposes": ["cover.porte_banc"], "nuit_debut": "20:30:00",
+                            "consignes": "Merci de fermer le portail.", "duree_passage_h": 3})
+            info = await w.ok({"type": "visiteurs/info"})
+            check("accès proposés et consignes appliqués", [a["entity_id"] for a in info["acces"]] == [
+                "cover.porte_banc"] and info["consignes"] == "Merci de fermer le portail." and info["durees"][
+                "passage"] == 3, str(info)[:300])
+            r = await w.ok({"type": "visiteurs/regler", "acces_proposes": ["lock.nexiste_pas"]})
+            check("accès inexistant refusé", r["ok"] is False and r["erreur"] == "acces", str(r))
+            reg = await w.ok({"type": "config/entity_registry/list"})
+            sw = {e["translation_key"]: e["entity_id"] for e in reg if e["platform"] == "visiteurs" and
+                  e["entity_id"].startswith("switch.")}
+            check("4 interrupteurs de comportement", len(sw) == 4, str(sw))
+            await w.ok({"type": "call_service", "domain": "switch", "service": "turn_off",
+                        "target": {"entity_id": sw["regle_armement"]}})
+            await asyncio.sleep(1)
+            r = await w.ok({"type": "visiteurs/reglages"})
+            check("interrupteur → réglage enregistré", r["valeurs"]["regle_armement"] is False, str(r["valeurs"]))
+            await w.ok({"type": "call_service", "domain": "switch", "service": "turn_on",
+                        "target": {"entity_id": sw["regle_armement"]}})
+            await asyncio.sleep(2)
+            redo = [e for e in w.events if e.get("event_type") == "visiteurs_debut"]
+            check("réglages : visites en cours non réannoncées", not redo, str(redo))
+            info = await w.ok({"type": "visiteurs/info"})
+            check("réglages : Marc toujours en cours", any(v["nom"] == "Marc" and v["statut"] == "en_cours"
+                                                           for v in info["visites"]))
+        async with WS(s, st["julie"]) as w:
+            r = await w.call({"type": "call_service", "domain": "switch", "service": "turn_off",
+                              "target": {"entity_id": sw["regle_armement"]}})
+        check("interrupteur refusé à Julie", not r.get("success") and (await state(s, A, sw["regle_armement"]))[
+            "state"] == "on", str(r))
         json.dump({**st, "mamie": mamie["id"], "marc": marc_id}, open(STATE_FILE, "w"))
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} contrôles OK")
 

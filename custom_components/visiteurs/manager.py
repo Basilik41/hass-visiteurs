@@ -93,10 +93,8 @@ def _hash(pin: str) -> dict[str, Any]:
 class Visiteurs:
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass, self.entry = hass, entry
-        o = {**DEFAULTS, **entry.data, **entry.options}
-        self.o = o
-        self.avant = int(o.get(CONF_MARGE_AVANT) or 0)
-        self.apres = int(o.get(CONF_MARGE_APRES) or 0)
+        self.quiet_update = False  # réglage changé depuis le tableau de bord : pas de rechargement
+        self._load_options()
         self._store: Store = Store(hass, STORE_VERSION, STORE_KEY, private=True, atomic_writes=True)
         self.visites: dict[str, dict] = {}
         self._listeners: list[Callable[[], None]] = []
@@ -104,6 +102,27 @@ class Visiteurs:
         self._wake: CALLBACK_TYPE | None = None
         self._actives: set[str] = set()
         self._started = False
+
+    def _load_options(self) -> None:
+        self.o = {**DEFAULTS, **self.entry.data, **self.entry.options}
+        self.avant = int(self.o.get(CONF_MARGE_AVANT) or 0)
+        self.apres = int(self.o.get(CONF_MARGE_APRES) or 0)
+
+    async def apply_settings(self, changes: dict[str, Any]) -> None:
+        """Réglages modifiés depuis la carte ou un interrupteur : enregistrés dans les options, appliqués tout de
+        suite, sans recharger le module (les visites en cours ne sont pas réannoncées)."""
+        new = {**self.entry.options}
+        for k, v in changes.items():
+            if v is None or v == "":
+                new.pop(k, None)
+            else:
+                new[k] = v
+        if new == dict(self.entry.options):
+            return
+        self.quiet_update = True
+        self.hass.config_entries.async_update_entry(self.entry, options=new)
+        self._load_options()
+        await self._refresh()
 
     # ───────── démarrage ─────────
     async def async_start(self) -> None:

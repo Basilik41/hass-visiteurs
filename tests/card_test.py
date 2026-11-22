@@ -82,6 +82,8 @@ async def main():
                              "mode": "storage", "require_admin": False, "show_in_sidebar": False}])
         await ws(s, A, [{"type": "lovelace/config/save", "url_path": "visiteurs-test", "config": cfg},
                         {"type": "input_boolean/list"}])
+        await ws(s, A, [{"type": "visiteurs/regler", "acces_proposes": ["cover.porte_banc",
+                                                                   "alarm_control_panel.alarme_banc"]}])
         info = (await ws(s, A, [{"type": "visiteurs/info"}]))[0]["result"]
         marc = next(v for v in info["visites"] if v["nom"] == "Marc")
         await ws(s, A, [{"type": "call_service", "domain": "cover", "service": "close_cover", "target": {"entity_id": "cover.porte_banc"}}])
@@ -120,7 +122,7 @@ async def main():
             code = (await card.locator(".grandcode").inner_text()).strip()
             msg = await card.locator("#msg").input_value()
             check("résultat : code et message", code.isdigit() and len(code) == 6 and "Bonjour Paul" in msg
-                  and code in msg and "Invités Grange" in msg, msg)
+                  and code in msg and "Wi-Fi :" in msg, msg)
             sms = await card.locator('a[href^="sms:"]').get_attribute("href")
             check("lien SMS vers le téléphone", sms and sms.startswith("sms:0612345678?body="), sms)
             await page.screenshot(path=f"{OUT}/3_resultat.png")
@@ -157,6 +159,27 @@ async def main():
             await card.locator('[data-a="enregistrer"]').click()
             check("nom obligatoire", "Indiquer le nom" in await card.locator(".err").inner_text())
             await card.locator('[data-a="annuler"]').click()
+            # réglages (admin)
+            await card.locator('[data-a="reglages"]').click()
+            await card.locator("#r_mdp").wait_for(timeout=10000)
+            before = await card.locator("#r_mdp").input_value()
+            await card.locator('[data-a="r_gen"]').click()
+            await page.wait_for_timeout(1500)
+            after = await card.locator("#r_mdp").input_value()
+            check("réglages : 🎲 génère un nouveau mot de passe", after and after != before, f"{before} → {after}")
+            await card.locator("#r_cons").fill("Fermez le portail, merci.")
+            await card.locator('[data-rb="regle_passage_info"]').uncheck()
+            await card.locator('[data-rs="prevenir"][data-v="codes"]').click()
+            check("réglages : saisie conservée après un choix", await card.locator("#r_cons").input_value() ==
+                  "Fermez le portail, merci.")
+            await page.screenshot(path=f"{OUT}/8_reglages.png")
+            await card.locator('[data-a="r_enregistrer"]').click()
+            await page.wait_for_timeout(1500)
+            rg = (await ws(s, A, [{"type": "visiteurs/reglages"}]))[0]["result"]["valeurs"]
+            check("réglages enregistrés (consignes, interrupteur, prévenir)", rg["consignes"] == "Fermez le portail, merci."
+                  and rg["regle_passage_info"] is False and rg["prevenir"] == "codes" and rg["wifi_mot_de_passe"] == after,
+                  str(rg))
+            await ws(s, A, [{"type": "visiteurs/regler", "regle_passage_info": True, "prevenir": "tout"}])
             check("aucune erreur console (ordinateur)", not [e for e in errors if "visiteurs" in e.lower()
                                                             or "code-pin" in e.lower()], str(errors[:5]))
             await ctx.close()
@@ -183,8 +206,9 @@ async def main():
             t = await cards.first.evaluate("(e) => e.shadowRoot.textContent")
             check("tablette : mode accueil automatique", "Bienvenue" in t and "Mamie" in t and "Marc" in t, t)
             check("tablette : QR code Wi-Fi", await cards.first.locator(".qr svg").count() == 1)
-            check("tablette : mot de passe et consignes", "bienvenue;2026" in t and "Fermer le portail." in t, t)
-            check("tablette : aucun bouton de gestion", await cards.first.locator('[data-a="nouveau"]').count() == 0)
+            check("tablette : mot de passe et consignes", after in t and "Fermez le portail, merci." in t, t)
+            check("tablette : aucun bouton de gestion", await cards.first.locator('[data-a="nouveau"]').count() == 0
+                  and await cards.first.locator('[data-a="reglages"]').count() == 0)
             await page.screenshot(path=f"{OUT}/6_tablette_accueil.png", full_page=True)
             cp = page.locator("code-pin-card")
             await cp.locator("button", has_text="Ouvrir").first.click()

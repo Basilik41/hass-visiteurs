@@ -135,3 +135,11 @@ def test_nuit():
     assert not in_night(at(6), "22:00", "06:00") and not in_night(at(12), "22:00", "06:00")
     assert in_night(at(13), "12:00", "14:00") and not in_night(at(14), "12:00", "14:00")
     assert not in_night(at(1), "00:00", "00:00")
+
+
+def test_mot_de_passe_wifi():
+    import re
+    from visiteurs.visites import generate_wifi_password
+    seen = {generate_wifi_password() for _ in range(200)}
+    assert len(seen) == 200
+    assert all(re.fullmatch(r"[a-hjkmnp-z2-9]{4}-[a-hjkmnp-z2-9]{4}-[a-hjkmnp-z2-9]{4}", p) for p in seen)

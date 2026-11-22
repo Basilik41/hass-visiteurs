@@ -22,7 +22,7 @@ from .manager import Visiteurs
 _LOGGER = logging.getLogger(__name__)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 CARD_PATH = Path(__file__).parent / "frontend" / "visiteurs-card.js"
-PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.CALENDAR]
+PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.CALENDAR, Platform.SWITCH]
 
 type VisiteursConfigEntry = ConfigEntry[Visiteurs]
 
@@ -66,6 +66,10 @@ async def async_remove_entry(hass: HomeAssistant, entry: VisiteursConfigEntry) -
 
 
 async def _options_changed(hass: HomeAssistant, entry: VisiteursConfigEntry) -> None:
+    mgr = getattr(entry, "runtime_data", None)
+    if mgr is not None and mgr.quiet_update:  # déjà appliqué par le module lui-même
+        mgr.quiet_update = False
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 
