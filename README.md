@@ -7,6 +7,10 @@ Gère les visiteurs simplement, depuis le téléphone, la tablette ou l'agenda :
 - **« Dort ici »** : un visiteur de passage reste dormir (une nuit ou plus) — il compte alors comme « reste sur place », avec le même code et les mêmes accès ; ses passages habituels reprennent ensuite. « Annuler la nuit » revient en arrière.
 - **Visite prévue ou « là maintenant »**. Début et fin automatiques à l'heure près, avec une marge réglable avant et après.
 - **Code visiteur temporaire** (module *Codes d'accès* ≥ 1.1) : sur les tablettes murales (bouton 🔑 « Visiteur »), seulement pendant la visite, seulement pour les accès cochés. Un code visiteur ne désarme jamais l'alarme, sauf si on coche « peut désarmer » pour cette visite. Chaque usage est signalé. 5 codes faux : codes visiteur bloqués (5 min, puis plus).
+- **Lecteurs UniFi Access** : si l'intégration UniFi Access est installée, ses portes (boutons « Déverrouiller ») peuvent être cochées comme accès. Pendant chaque visite (ou chaque passage), le code visiteur est créé sur le lecteur (visiteur UniFi Access avec ce PIN, ces portes et une heure de fin), puis supprimé à la fin. Jeton API UniFi Access avec les droits `view:visitor` et `edit:visitor`. Bouton « Tester UniFi Access » dans les réglages ; un code refusé par le lecteur (déjà pris, longueur) est signalé aux administrateurs.
+- **Même code sur plusieurs sites** : le code peut être choisi à la main (4 à 8 chiffres) ; une même personne garde ainsi un seul code sur la Maison et la Grange.
+- **Notifications par visite** : téléphones, journal seulement (niveau `info`) ou rien. Par défaut, une visite régulière va au journal (pas d'alerte à chaque passage).
+- **Rappel** une fois, à 10 h, quand des passages réguliers s'arrêtent dans 7 jours ou moins (événement `visiteurs_fin_serie_proche`).
 - **Message d'accueil** prêt à envoyer (SMS, copier, partager) : dates, code et ce qu'il ouvre, Wi-Fi invité, consignes.
 - **Page d'accueil** pour la tablette : « Bienvenue Marc ! », QR code du Wi-Fi invité, mot de passe, consignes.
 - **Véhicule** : plaque du visiteur reconnue (lecture tolérante) par l'action `visiteurs.reconnaitre_plaque`.
@@ -63,8 +67,8 @@ Ils ne changent rien seuls : ce sont vos automatisations qui les lisent. Réserv
 - Le mot de passe du Wi-Fi invité est visible de tous les comptes (il est fait pour être donné) : ne pas y mettre celui du Wi-Fi principal.
 - Le code visiteur est conservé lisible pour la famille (pour pouvoir le renvoyer) dans le stockage privé de Home Assistant, et haché pour la vérification.
 - Passages réguliers : par semaine seulement (pas « le premier lundi du mois »). Un passage sauté ou arrêté disparaît de l'agenda.
-- Codes visiteur : seulement sur les tablettes murales (comptes « TabDomo… »). Pas encore sur les lecteurs physiques (UniFi Access).
+- Codes visiteur : tablettes murales (comptes « TabDomo… ») et lecteurs UniFi Access. L'arrivée au lecteur n'est pas encore notée comme « arrivé·e ».
 
 ## Tests
 
-`tests/test_visites.py` (fonctions pures, 16), `tests/bench_visiteurs.py` (89 contrôles + 3 après redémarrage sur un vrai Home Assistant avec *Codes d'accès* 1.1), `tests/card_test.py` (41 contrôles dans Chromium : ordinateur, téléphone 380 px, tablette).
+`tests/test_visites.py` (fonctions pures, 16), `tests/bench_visiteurs.py` (105 contrôles + 5 après redémarrage, avec une imitation de l'API UniFi Access sur un vrai Home Assistant avec *Codes d'accès* 1.1), `tests/card_test.py` (49 contrôles dans Chromium : ordinateur, téléphone 380 px, tablette).

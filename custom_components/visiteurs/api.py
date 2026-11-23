@@ -36,6 +36,7 @@ from .const import (
     VERSION,
 )
 from .manager import VisiteError, Visiteurs
+from .unifi import is_access_entity
 from .visites import generate_wifi_password, parse_dt
 
 _CODE = vol.Any(cv.boolean, vol.All(cv.string, vol.Match(r"^(\d{4,8}|nouveau|garder|aucun)$")))
@@ -49,7 +50,8 @@ _FIELDS = {
     vol.Optional("telephone"): vol.Any(None, vol.All(cv.string, vol.Length(max=30))),
     vol.Optional("note"): vol.Any(None, vol.All(cv.string, vol.Length(max=500))),
     vol.Optional("code"): _CODE,
-    vol.Optional("acces"): vol.Any(None, vol.All(cv.ensure_list, [cv.entity_id])),
+    vol.Optional("acces"): vol.Any(None, vol.In(["tous"]), vol.All(cv.ensure_list, [cv.entity_id])),
+    vol.Optional("notifications"): vol.Any(None, vol.In(["auto", "telephones", "journal", "aucune"])),
     vol.Optional("alarme"): cv.boolean,
     # passages réguliers : jours (lundi…dimanche), créneau, toutes les N semaines, jusqu'au (date)
     vol.Optional("repetition_jours"): vol.Any(None, vol.All(cv.ensure_list, [vol.Any(cv.string, vol.Coerce(int))])),
@@ -206,7 +208,7 @@ def _handler(manage: bool = False) -> Callable:
 @callback
 def async_register_ws(hass: HomeAssistant) -> None:
     for cmd in (ws_info, ws_ajouter, ws_modifier, ws_terminer, ws_supprimer, ws_sauter, ws_sejour, ws_message,
-                ws_reglages, ws_regler):
+                ws_reglages, ws_regler, ws_lecteurs):
         websocket_api.async_register_command(hass, cmd)
 
 
@@ -235,6 +237,7 @@ async def ws_info(hass: HomeAssistant, conn: websocket_api.ActiveConnection, msg
         "acces": m.access_choices() if manage else [], "wifi": m.wifi(), "consignes": m.o.get(CONF_CONSIGNES) or "",
         "durees": {"passage": m.o.get(CONF_DUREE_PASSAGE), "sur_place": m.o.get(CONF_DUREE_SUR_PLACE)},
         "nuit": m.is_night(), "maintenant": dt_util.utcnow().isoformat(), "admin": _is_admin(conn.user),
+        "lecteurs": {"disponible": m.access.available, "erreur": m.access.last_error if manage else None},
     }
 
 
@@ -340,14 +343,16 @@ def _reglages(hass: HomeAssistant, m: Visiteurs) -> dict:
     keys = [str(k) for k in REGLAGES if str(k) != "wifi_generer"]
     current = {k: m.o.get(k) for k in keys}
     chosen = set(m.o.get(CONF_ACCES) or [])
-    cands = sorted({s.entity_id for s in hass.states.async_all(_ACCESS_DOMAINS)} | chosen)
+    cands = sorted({s.entity_id for s in hass.states.async_all(_ACCESS_DOMAINS)}
+                   | {s.entity_id for s in hass.states.async_all("button") if is_access_entity(hass, s.entity_id)}
+                   | chosen)
     lights = sorted({s.entity_id for s in hass.states.async_all("light")}
                     | ({m.o[CONF_LUMIERE]} if m.o.get(CONF_LUMIERE) else set()))
     return {
         "valeurs": current,
         "regles": {k: label for k, (label, _icon) in REGLES.items()},
-        "acces_possibles": [{"entity_id": e, "nom": m._access_name(e), "alarme": e.startswith("alarm_control_panel.")}
-                            for e in cands],
+        "acces_possibles": [{"entity_id": e, "nom": m._access_name(e), "alarme": e.startswith("alarm_control_panel."),
+                             "lecteur": is_access_entity(hass, e)} for e in cands],
         "lumieres_possibles": [{"entity_id": e, "nom": m._access_name(e)} for e in lights],
     }
 
@@ -379,3 +384,16 @@ async def ws_regler(hass: HomeAssistant, conn: websocket_api.ActiveConnection, m
         raise VisiteError("acces", "Entité introuvable : " + ", ".join(bad))
     await m.apply_settings(data)
     return _reglages(hass, m)
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/lecteurs"})
+@websocket_api.async_response
+@_handler()
+async def ws_lecteurs(hass: HomeAssistant, conn: websocket_api.ActiveConnection, msg: dict, m: Visiteurs) -> dict:
+    """Diagnostic UniFi Access (administrateurs) : connexion, droits sur les visiteurs, portes."""
+    if not _is_admin(conn.user):
+        raise VisiteError("admin", "Réservé aux administrateurs.")
+    res = await m.access.check()
+    res["visiteurs_crees"] = len(m.unifi)
+    res["erreur"] = m.access.last_error
+    return {"lecteurs": res}

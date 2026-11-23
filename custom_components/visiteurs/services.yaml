@@ -13,6 +13,14 @@ ajouter:
     code: {selector: {boolean: {}}}
     acces: {selector: {entity: {multiple: true}}}
     alarme: {selector: {boolean: {}}}
+    notifications:
+      selector:
+        select:
+          options:
+            - {value: auto, label: "Par défaut (régulière : journal ; sinon : téléphones)"}
+            - {value: telephones, label: Téléphones}
+            - {value: journal, label: Journal seulement}
+            - {value: aucune, label: Aucune}
     repetition_jours:
       selector:
         select:
@@ -44,6 +52,14 @@ modifier:
     code: {selector: {text: {}}}
     acces: {selector: {entity: {multiple: true}}}
     alarme: {selector: {boolean: {}}}
+    notifications:
+      selector:
+        select:
+          options:
+            - {value: auto, label: "Par défaut (régulière : journal ; sinon : téléphones)"}
+            - {value: telephones, label: Téléphones}
+            - {value: journal, label: Journal seulement}
+            - {value: aucune, label: Aucune}
     repetition_jours:
       selector:
         select:

@@ -132,7 +132,7 @@
         },
         "acces": {
           "name": "Accès",
-          "description": "Ce que le code ouvre (parmi les accès proposés dans les options)."
+          "description": "Ce que le code ouvre (parmi les accès proposés dans les options) ; « tous » = tous les accès proposés."
         },
         "alarme": {
           "name": "Peut désarmer l'alarme",
@@ -157,6 +157,10 @@
         "jusqu_au": {
           "name": "Jusqu'au",
           "description": "Dernier jour des passages (vide : un an)."
+        },
+        "notifications": {
+          "name": "Notifications",
+          "description": "Téléphones (niveau réglé), journal seulement (niveau info) ou aucune. Par défaut : journal pour une visite régulière, téléphones sinon."
         }
       }
     },
@@ -231,6 +235,10 @@
         "jusqu_au": {
           "name": "Jusqu'au",
           "description": "Dernier jour des passages (vide : un an)."
+        },
+        "notifications": {
+          "name": "Notifications",
+          "description": "Téléphones (niveau réglé), journal seulement (niveau info) ou aucune. Par défaut : journal pour une visite régulière, téléphones sinon."
         }
       }
     },

@@ -132,7 +132,7 @@
         },
         "acces": {
           "name": "Accès",
-          "description": "Ce que le code ouvre (parmi les accès proposés dans les options)."
+          "description": "Ce que le code ouvre (parmi les accès proposés dans les options); « tous » = all offered accesses."
         },
         "alarme": {
           "name": "Peut désarmer l'alarme",
@@ -157,6 +157,10 @@
         "jusqu_au": {
           "name": "Until",
           "description": "Last day of the visits (empty: one year)."
+        },
+        "notifications": {
+          "name": "Notifications",
+          "description": "Phones (configured level), log only (info level) or none. Default: log for a recurring visit, phones otherwise."
         }
       }
     },
@@ -231,6 +235,10 @@
         "jusqu_au": {
           "name": "Until",
           "description": "Last day of the visits (empty: one year)."
+        },
+        "notifications": {
+          "name": "Notifications",
+          "description": "Phones (configured level), log only (info level) or none. Default: log for a recurring visit, phones otherwise."
         }
       }
     },

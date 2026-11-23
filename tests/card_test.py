@@ -82,8 +82,10 @@ async def main():
                              "mode": "storage", "require_admin": False, "show_in_sidebar": False}])
         await ws(s, A, [{"type": "lovelace/config/save", "url_path": "visiteurs-test", "config": cfg},
                         {"type": "input_boolean/list"}])
+        rg = (await ws(s, A, [{"type": "visiteurs/reglages"}]))[0]["result"]
+        lect = [a["entity_id"] for a in rg["acces_possibles"] if a.get("lecteur")]
         await ws(s, A, [{"type": "visiteurs/regler", "acces_proposes": ["cover.porte_banc",
-                                                                   "alarm_control_panel.alarme_banc"]}])
+                                                                   "alarm_control_panel.alarme_banc", *lect]}])
         info = (await ws(s, A, [{"type": "visiteurs/info"}]))[0]["result"]
         marc = next(v for v in info["visites"] if v["nom"] == "Marc")
         await ws(s, A, [{"type": "call_service", "domain": "cover", "service": "close_cover", "target": {"entity_id": "cover.porte_banc"}}])
@@ -229,6 +231,36 @@ async def main():
             check("dort ici sur un passage à venir : heure d'arrivée proposée", await card.locator("#s_debut").count() == 1)
             await card.locator('[data-a="s_annuler"]').click()
             await ws(s, A, [{"type": "visiteurs/supprimer", "visite": pv["id"]}])
+            # 1.4 : code choisi, notifications, lecteur UniFi Access
+            await card.locator('[data-a="nouveau"]').click()
+            await card.locator("#nom").fill("Cousin")
+            await card.locator('[data-f="type"][data-v="passage"]').click()
+            await card.locator("#code").check()
+            lab = await card.locator(".boite").inner_text()
+            check("formulaire : porte UniFi signalée « clavier du lecteur UniFi »", "clavier du lecteur UniFi" in lab, lab[:600])
+            await card.locator('[data-acc="cover.porte_banc"]').check()
+            sel_id = await card.locator('[data-acc^="button."]').first.get_attribute("data-acc")
+            await card.locator(f'[data-acc="{sel_id}"]').check()
+            await card.locator("#codeval").fill("12")
+            await card.locator('[data-a="enregistrer"]').click()
+            check("code trop court refusé", "4 à 8 chiffres" in await card.locator(".err").inner_text())
+            await card.locator("#codeval").fill("904417")
+            await card.locator('[data-f="notif"][data-v="journal"]').click()
+            check("notifications : choix « journal » expliqué", "journal (Discord) seulement" in await card.locator(".boite").inner_text())
+            await page.screenshot(path=f"{OUT}/13_code_notif.png")
+            await card.locator('[data-a="enregistrer"]').click()
+            await card.locator(".grandcode").wait_for(timeout=10000)
+            check("code choisi repris tel quel", (await card.locator(".grandcode").inner_text()).strip() == "904417")
+            msg = await card.locator("#msg").input_value()
+            check("message : porte du lecteur nommée « code au clavier du lecteur »", "code au clavier du lecteur" in msg, msg)
+            await card.locator('[data-a="fermer"]').click()
+            info = (await ws(s, A, [{"type": "visiteurs/info"}]))[0]["result"]
+            cz = next(v for v in info["visites"] if v["nom"] == "Cousin")
+            check("enregistré : notifications « journal »", cz["notifications"] == "journal", str(cz))
+            await page.wait_for_timeout(2500)
+            await card.locator(".v", has_text="Cousin").wait_for()
+            check("liste : « 🔢 code sur le lecteur »", "code sur le lecteur" in await card.locator(".v", has_text="Cousin").inner_text())
+            await ws(s, A, [{"type": "visiteurs/supprimer", "visite": cz["id"]}])
             # formulaire : erreurs
             await card.locator('[data-a="nouveau"]').click()
             await card.locator('[data-a="enregistrer"]').click()
@@ -248,6 +280,9 @@ async def main():
             check("réglages : saisie conservée après un choix", await card.locator("#r_cons").input_value() ==
                   "Fermez le portail, merci.")
             await page.screenshot(path=f"{OUT}/8_reglages.png")
+            await card.locator('[data-a="r_lecteurs"]').click()
+            await page.wait_for_timeout(2000)
+            check("réglages : « Tester UniFi Access » → connecté", "Connecté" in await card.locator(".boite").inner_text())
             await card.locator('[data-a="r_enregistrer"]').click()
             await page.wait_for_timeout(1500)
             rg = (await ws(s, A, [{"type": "visiteurs/reglages"}]))[0]["result"]["valeurs"]

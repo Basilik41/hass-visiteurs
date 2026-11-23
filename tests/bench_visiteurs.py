@@ -147,6 +147,29 @@ async def svc(s, tok, domain, service, data, response=False):
             return r.status, body
 
 
+async def fake(s, data=None):
+    """État du faux UniFi Access (et réglage d'une panne simulée)."""
+    import ssl as _ssl
+    ctx = _ssl.create_default_context()
+    ctx.check_hostname, ctx.verify_mode = False, _ssl.CERT_NONE
+    if data is None:
+        async with s.get("https://127.0.0.1:12445/_etat", ssl=ctx) as r:
+            return await r.json()
+    async with s.post("https://127.0.0.1:12445/_etat", json=data, ssl=ctx) as r:
+        return await r.json()
+
+
+async def notifs(w):
+    """Textes des notifications persistantes en cours."""
+    w.n += 1
+    await w.ws.send_json({"id": w.n, "type": "persistent_notification/subscribe"})
+    for _ in range(5):
+        msg = await w.ws.receive_json(timeout=5)
+        if msg.get("type") == "event":
+            return json.dumps(msg["event"], ensure_ascii=False)
+    return ""
+
+
 def local(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -529,6 +552,86 @@ async def main() -> None:
             check("agenda : supprimer la nuit l'annule (la série reste)", r.get("success") and not pv["sejours"] and
                   pv.get("recurrence"), f"{r} {pv}")
             await w.ok({"type": "visiteurs/supprimer", "visite": papa["id"]})
+        # ───────── 1.4 : UniFi Access, code commun, notifications par visite ─────────
+        h = {"Authorization": f"Bearer {A}"}
+        async with s.get(f"{BASE}/api/config/config_entries/entry", headers=h) as r:
+            if not any(e["domain"] == "unifi_access" for e in await r.json()):
+                async with s.post(f"{BASE}/api/config/config_entries/flow", headers=h,
+                                  json={"handler": "unifi_access"}) as r2:
+                    await r2.json()
+                await asyncio.sleep(2)
+        await fake(s, {"visiteurs": {}, "sans_droit_visiteur": False})
+        async with WS(s, A) as w:
+            reg = await w.ok({"type": "config/entity_registry/list"})
+            SEL = next(e["entity_id"] for e in reg if e.get("platform") == "unifi_access")
+            r = await w.ok({"type": "visiteurs/regler", "acces_proposes": ["cover.porte_banc",
+                                                                       "alarm_control_panel.alarme_banc", SEL]})
+            rg = await w.ok({"type": "visiteurs/reglages"})
+            lec = [a for a in rg["acces_possibles"] if a["entity_id"] == SEL]
+            check("UniFi Access : porte proposée dans les réglages (lecteur)", lec and lec[0]["lecteur"], str(lec))
+            r = await w.ok({"type": "visiteurs/lecteurs"})
+            check("UniFi Access : test de connexion (portes, droits)", r["lecteurs"]["ok"] and "sellerie" in
+                  json.dumps(r["lecteurs"]["portes"]), str(r))
+            r = await w.ok({"type": "visiteurs/ajouter", "nom": "Livreur", "type_visite": "passage", "code": "583920",
+                            "acces": ["cover.porte_banc", SEL], "duree": 1, "notifications": "aucune"})
+            liv = r.get("visite", {})
+            check("code choisi à la main (même code que sur l'autre site)", r["ok"] and liv.get("code") == "583920", str(r))
+            await asyncio.sleep(2)
+            st_ = await fake(s)
+            vs = list(st_["visiteurs"].values())
+            check("UniFi Access : visiteur créé avec le code et la porte", len(vs) == 1 and vs[0]["pin"] == "583920" and
+                  vs[0]["resources"] == [{"id": "4337a437-263f-4026-8876-6f7bcde5abc5", "type": "door"}] and
+                  vs[0]["visit_reason"] == "Others", str(vs))
+            fin_liv = datetime.fromisoformat(liv["fin"]).timestamp()
+            check("UniFi Access : valable jusqu'à la fin de la visite (+ marge)", vs and abs(vs[0]["end_time"] - fin_liv)
+                  < 5, f"{vs and vs[0]['end_time']} vs {fin_liv}")
+            info = await w.ok({"type": "visiteurs/info"})
+            lv = next(v for v in info["visites"] if v["id"] == liv["id"])
+            check("carte : « code sur le lecteur », notifications « aucune »", lv["lecteur"] and lv["notif_effective"] ==
+                  "aucune", str(lv))
+            txt = await notifs(w)
+            check("notifications « aucune » : pas de message pour le livreur", "Livreur" not in txt, txt[:300])
+            await w.ok({"type": "visiteurs/modifier", "visite": liv["id"], "fin": local(datetime.now() + timedelta(hours=3))})
+            await asyncio.sleep(2)
+            vs2 = list((await fake(s))["visiteurs"].values())
+            check("UniFi Access : départ modifié → visiteur mis à jour", len(vs2) == 1 and vs2[0]["end_time"] >
+                  vs[0]["end_time"] + 3000, str(vs2))
+            r = await w.ok({"type": "visiteurs/ajouter", "nom": "Conflit", "type_visite": "passage", "code": "135790",
+                            "acces": [SEL], "duree": 1})
+            await asyncio.sleep(2)
+            info = await w.ok({"type": "visiteurs/info"})
+            check("UniFi Access : code déjà pris sur le lecteur → erreur affichée", r["ok"] and "135790" not in json.dumps(
+                (await fake(s))["visiteurs"]) and "code refusé" in (info["lecteurs"]["erreur"] or ""), str(info["lecteurs"]))
+            txt = await notifs(w)
+            check("UniFi Access : erreur signalée aux administrateurs", "UniFi Access" in txt and "Conflit" in txt, txt[:400])
+            await w.ok({"type": "visiteurs/supprimer", "visite": r["visite"]["id"]})
+            await w.ok({"type": "visiteurs/terminer", "visite": liv["id"]})
+            await asyncio.sleep(2)
+            info = await w.ok({"type": "visiteurs/info"})
+            check("UniFi Access : fin de visite → visiteur supprimé du lecteur, plus d'erreur", (await fake(s))["visiteurs"]
+                  == {} and not info["lecteurs"]["erreur"], str(info["lecteurs"]))
+            # passage régulier : journal par défaut, code sur le lecteur seulement pendant le passage
+            t0 = datetime.now() - timedelta(minutes=5)
+            t1 = datetime.now() + timedelta(minutes=40)
+            r = await w.ok({"type": "visiteurs/ajouter", "nom": "Grand-père", "type_visite": "passage",
+                            "repetition_jours": JL, "heure_debut": t0.strftime("%H:%M"),
+                            "heure_fin": t1.strftime("%H:%M"), "code": "720461", "acces": "tous",
+                            "jusqu_au": (datetime.now() + timedelta(days=5)).date().isoformat()})
+            gp = r.get("visite", {})
+            check("« tous les accès » proposés", r["ok"] and set(gp.get("acces") or []) == {
+                "cover.porte_banc", "alarm_control_panel.alarme_banc", SEL}, str(r))
+            check("visite régulière : notifications « journal » par défaut", gp.get("notif_effective") == "journal", str(gp))
+            await asyncio.sleep(2)
+            vs = list((await fake(s))["visiteurs"].values())
+            check("UniFi Access : passage en cours → code sur le lecteur", len(vs) == 1 and vs[0]["pin"] == "720461", str(vs))
+            await w.ok({"type": "visiteurs/terminer", "visite": gp["id"]})
+            await asyncio.sleep(2)
+            check("UniFi Access : « Parti·e » → code retiré du lecteur", (await fake(s))["visiteurs"] == {})
+            await fake(s, {"sans_droit_visiteur": True})
+            r = await w.ok({"type": "visiteurs/lecteurs"})
+            check("UniFi Access : jeton sans droit visiteurs → message clair", not r["lecteurs"]["ok"] and "droits" in
+                  r["lecteurs"]["message"], str(r))
+            await fake(s, {"sans_droit_visiteur": False})
         # ───────── réglages depuis le tableau de bord (1.1) ─────────
         async with WS(s, st["julie"]) as w:
             r = await w.ok({"type": "visiteurs/reglages"})
@@ -583,7 +686,8 @@ async def main() -> None:
                               "target": {"entity_id": sw["regle_armement"]}})
         check("interrupteur refusé à Julie", not r.get("success") and (await state(s, A, sw["regle_armement"]))[
             "state"] == "on", str(r))
-        json.dump({**st, "mamie": mamie["id"], "marc": marc_id, "marechal": mar_id}, open(STATE_FILE, "w"))
+        json.dump({**st, "mamie": mamie["id"], "marc": marc_id, "marechal": mar_id, "grandpere": gp["id"]},
+                  open(STATE_FILE, "w"))
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} contrôles OK")
 
 
@@ -600,6 +704,12 @@ async def after_restart(s, st) -> None:
     mar = next((v for v in vi["visites"] if v["nom"] == "Maréchal"), {})
     check("après redémarrage : série conservée (une semaine sur deux, 2 passages sautés)", mar.get("statut") ==
           "prevue" and mar.get("recurrence", {}).get("toutes") == 2 and len(mar.get("sauf") or []) == 2, str(mar))
+    async with WS(s, A) as w:
+        vi = await w.ok({"type": "visiteurs/info"})
+        gp = next((v for v in vi["visites"] if v["nom"] == "Grand-père"), {})
+        check("rappel : série qui s'arrête dans 5 jours → rappel envoyé au démarrage", gp.get("rappel_fin_envoye"), str(gp))
+        txt = await notifs(w)
+        check("rappel : message « s'arrêtent le »", "Grand-père s'arrêtent le" in txt, txt[:400])
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} contrôles OK")
 
 

@@ -54,6 +54,7 @@ from .const import (
     SUR_PLACE,
     TYPE_LABELS,
 )
+from .unifi import AccessSync, is_access_entity
 from .visites import (
     EN_COURS,
     SAUF_MAX,
@@ -112,6 +113,8 @@ class Visiteurs:
         self._wake: CALLBACK_TYPE | None = None
         self._actives: dict[str, dict] = {}  # visites en cours (vue « passage » pour les séries)
         self._started = False
+        self.unifi: dict[str, dict] = {}      # visite → visiteur UniFi Access créé pour elle
+        self.access = AccessSync(self)
 
     def _load_options(self) -> None:
         self.o = {**DEFAULTS, **self.entry.data, **self.entry.options}
@@ -138,16 +141,20 @@ class Visiteurs:
     async def async_start(self) -> None:
         data = await self._store.async_load() or {}
         self.visites = {k: v for k, v in (data.get("visites") or {}).items() if isinstance(v, dict)}
+        self.unifi = {k: v for k, v in (data.get("unifi") or {}).items() if isinstance(v, dict) and v.get("id")}
         now = dt_util.utcnow()
         # Au démarrage : pas d'événement « début » pour les visites déjà en cours (rien de manqué à annoncer)
         self._actives = {v["id"]: v for v in actives(self._all(now), now, self.avant, self.apres)}
         self._unsubs += [
             async_track_time_interval(self.hass, self._tick, timedelta(seconds=REFRESH_SECONDS)),
             async_track_time_change(self.hass, self._lights_off, hour=23, minute=0, second=0),
+            async_track_time_change(self.hass, self._reminders, hour=10, minute=0, second=0),
         ]
         self.hass.data[CODE_PIN_PROVIDER] = self
         self._started = True
         self._schedule()
+        self.hass.async_create_task(self.access.sync())
+        self.hass.async_create_task(self._reminders())
 
     async def async_stop(self) -> None:
         for u in self._unsubs:
@@ -161,7 +168,10 @@ class Visiteurs:
         await self._save()
 
     async def _save(self) -> None:
-        await self._store.async_save({"visites": self.visites})
+        await self._store.async_save({"visites": self.visites, "unifi": self.unifi})
+
+    async def save_unifi(self) -> None:
+        await self._save()
 
     # ───────── abonnements des entités ─────────
     @callback
@@ -219,6 +229,7 @@ class Visiteurs:
             await self._save()
         self._schedule()
         self._notify_listeners()
+        self.hass.async_create_task(self.access.sync())
 
     def _event_data(self, v: dict) -> dict:
         return {"id": v["id"], "nom": v.get("nom"), "type": v.get("type"), "debut": v.get("debut"),
@@ -271,6 +282,10 @@ class Visiteurs:
         out["sejours"] = [{"debut": x.get("debut"), "fin": x.get("fin")} for x in v.get("sejours") or []
                           if (parse_dt(x.get("fin")) or now) > now]
         out["dort_ici"] = bool(v.get("dort_ici"))
+        out["notifications"] = v.get("notifications")
+        out["notif_effective"] = self.notif_mode(v)
+        out["lecteur"] = v["id"] in self.unifi
+        out["rappel_fin_envoye"] = bool(v.get("rappel_fin")) and v.get("rappel_fin") == v.get("serie_fin", v.get("fin"))
         out["statut"] = statut(v, self.now(), self.avant, self.apres)
         out["a_un_code"] = bool(v.get("code"))
         if admin:
@@ -285,13 +300,18 @@ class Visiteurs:
         out = []
         for eid in self.o.get(CONF_ACCES) or []:
             out.append({"entity_id": eid, "nom": self._access_name(eid),
-                        "alarme": eid.startswith("alarm_control_panel.")})
+                        "alarme": eid.startswith("alarm_control_panel."),
+                        "lecteur": is_access_entity(self.hass, eid)})
         return out
 
     def _access_name(self, eid: str) -> str:
         """« Porte (Écurie) » : nom de l'entité, complété par sa pièce quand le nom ne la dit pas."""
         st = self.hass.states.get(eid)
         name = (st.name if st else None) or eid
+        if is_access_entity(self.hass, eid):  # « sellerie Déverrouiller » → « Sellerie »
+            for mot in (" Déverrouiller", " Unlock", " déverrouiller"):
+                name = name.replace(mot, "")
+            name = name[:1].upper() + name[1:]
         ent = er.async_get(self.hass).async_get(eid)
         area_id = ent.area_id if ent else None
         if ent and not area_id and ent.device_id:
@@ -304,7 +324,8 @@ class Visiteurs:
 
     def message(self, vid: str) -> str:
         v = self.eff(self._get(vid))
-        names = {a["entity_id"]: a["nom"] for a in self.access_choices()}
+        names = {a["entity_id"]: a["nom"] + (" (code au clavier du lecteur)" if a["lecteur"] else "")
+                 for a in self.access_choices()}
         portes = [names.get(e, e) for e in v.get("acces") or []]
         w = self.wifi()
         return accueil_message(v, self.hass.config.location_name or "la maison", (w["ssid"], w["mot_de_passe"]),
@@ -425,8 +446,18 @@ class Visiteurs:
         for k, n in (("telephone", 30), ("note", 500)):
             if k in data or creating:
                 v[k] = str(data.get(k) or "").strip()[:n]
+        if "notifications" in data:
+            n = data.get("notifications")
+            if n in (None, "", "auto"):
+                v.pop("notifications", None)
+            elif n in ("telephones", "journal", "aucune"):
+                v["notifications"] = n
+            else:
+                raise VisiteError("notifications", "Notifications : telephones, journal ou aucune.")
         if "acces" in data or creating:
             allowed = set(self.o.get(CONF_ACCES) or [])
+            if data.get("acces") in ("tous", ["tous"]):
+                data = {**data, "acces": list(self.o.get(CONF_ACCES) or [])}
             acces = [e for e in (data.get("acces") or []) if e in allowed]
             refused = [e for e in (data.get("acces") or []) if e not in allowed]
             if refused:
@@ -588,10 +619,11 @@ class Visiteurs:
         if v is None or self.eff(v).get("arrivee"):
             return False
         v["arrivee"] = {"t": self.now().isoformat(), "source": source}
-        self._store.async_delay_save(lambda: {"visites": self.visites}, 5)
+        self._store.async_delay_save(lambda: {"visites": self.visites, "unifi": self.unifi}, 5)
         self._notify_listeners()
-        if announce and self._prevenir() in ("tout", "arrivee_depart"):
-            await self._send(f"👋 {v['nom']} est arrivé(e) ({source}).", self._niveau(), f"visiteur_{vid}")
+        niveau = self._niveau_v(v)
+        if announce and niveau and self._prevenir() in ("tout", "arrivee_depart"):
+            await self._send(f"👋 {v['nom']} est arrivé(e) ({source}).", niveau, f"visiteur_{vid}")
         return True
 
     async def recognize_plate(self, reads: list[str]) -> dict | None:
@@ -612,12 +644,51 @@ class Visiteurs:
     def _prevenir(self) -> str:
         return str(self.o.get(CONF_PREVENIR) or "tout")
 
+    @staticmethod
+    def notif_mode(v: dict) -> str:
+        """Notifications d'une visite : téléphones, journal seulement (niveau info) ou aucune.
+        Par défaut : visite régulière → journal (pas d'alerte à chaque passage) ; sinon → téléphones."""
+        return v.get("notifications") or ("journal" if v.get("recurrence") else "telephones")
+
+    def _niveau_v(self, v: dict) -> str | None:
+        mode = self.notif_mode(v)
+        return None if mode == "aucune" else "info" if mode == "journal" else self._niveau()
+
+    async def send_admin(self, message: str) -> None:
+        await self._send(message, self._niveau(), "visiteurs_admin")
+
+    async def _reminders(self, _now: Any = None) -> None:
+        """Visite régulière qui s'arrête dans 7 jours au plus : on le rappelle une fois (pour la prolonger)."""
+        tz, now = self.tz(), self.now()
+        today = dt_util.as_local(now).date()
+        changed = False
+        for v in self.visites.values():
+            if not v.get("recurrence") or v.get("terminee") or v.get("rappel_fin") == v.get("fin"):
+                continue
+            fin = parse_dt(v.get("fin"))
+            if fin is None:
+                continue
+            last = (fin - timedelta(seconds=1)).astimezone(tz).date()
+            jours = (last - today).days
+            if 0 <= jours <= 7 and occurrence(v, now, tz, self.apres) is not None:
+                quand = "aujourd'hui" if jours == 0 else "demain" if jours == 1 else f"dans {jours} jours"
+                await self._send(f"🔁 Les passages de {v.get('nom')} s'arrêtent le {last.strftime('%d/%m/%Y')} "
+                                 f"({quand}). Pour continuer : carte Visiteurs › Modifier › période.",
+                                 self._niveau(), f"visiteur_fin_serie_{v['id']}")
+                self.hass.bus.async_fire(f"{DOMAIN}_fin_serie_proche", {"id": v["id"], "nom": v.get("nom"),
+                                                                       "dernier_jour": last.isoformat()})
+                v["rappel_fin"] = v.get("fin")
+                changed = True
+        if changed:
+            await self._save()
+
     async def _on_start(self, v: dict) -> None:
-        if self._prevenir() == "tout":
+        niveau = self._niveau_v(v)
+        if niveau and self._prevenir() == "tout":
             fin = parse_dt(v.get("fin"))
             jusqu = dt_util.as_local(fin).strftime("%d/%m %H:%M") if fin else "?"
             await self._send(f"🧳 Visite de {v['nom']} ({TYPE_LABELS.get(v.get('type'), '')}) jusqu'au {jusqu}."
-                             + (" Code visiteur actif." if v.get("code") else ""), self._niveau(), f"visiteur_{v['id']}")
+                             + (" Code visiteur actif." if v.get("code") else ""), niveau, f"visiteur_{v['id']}")
         light = self.o.get(CONF_LUMIERE)
         sun = self.hass.states.get("sun.sun")
         if light and sun is not None and sun.state == "below_horizon" and self.hass.states.get(light) is not None:
@@ -631,10 +702,11 @@ class Visiteurs:
                     _LOGGER.warning("Lumière d'accueil non allumée : %s", err)
 
     async def _on_end(self, v: dict, silent: bool = False) -> None:
-        if not silent and self._prevenir() in ("tout", "arrivee_depart"):
+        niveau = self._niveau_v(v)
+        if not silent and niveau and self._prevenir() in ("tout", "arrivee_depart"):
             await self._send(f"🚪 Fin de la visite de {v.get('nom')}." + (" Son code ne fonctionne plus."
                                                                            if v.get("code") else ""),
-                             self._niveau(), f"visiteur_{v['id']}")
+                             niveau, f"visiteur_{v['id']}")
 
     async def _lights_off(self, _now: Any) -> None:
         light = self.hass.data.get(DOMAIN, {}).pop("lumiere_allumee", None)
@@ -664,8 +736,9 @@ class Visiteurs:
     async def code_utilise(self, vid: str, action: str, entity_name: str) -> None:
         await self.mark_arrival(vid, "code", announce=False)
         v = self.visites.get(vid) or {}
-        if self._prevenir() != "rien":  # chaque usage d'un code visiteur est signalé (choix de Richard)
-            await self._send(f"🔑 {v.get('nom', 'Visiteur')} : {action.lower()} {entity_name}.", self._niveau(),
+        niveau = self._niveau_v(v)
+        if niveau and self._prevenir() != "rien":  # chaque usage d'un code visiteur est signalé (choix de Richard)
+            await self._send(f"🔑 {v.get('nom', 'Visiteur')} : {action.lower()} {entity_name}.", niveau,
                              f"visiteur_code_{vid}")
 
 

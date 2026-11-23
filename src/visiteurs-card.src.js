@@ -4,7 +4,7 @@
  *   title: Visiteurs
  */
 /* global __QR__ */
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 const QR = __QR__;
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -232,6 +232,7 @@ class VisiteursCard extends HTMLElement {
     return `<div class="tete"><h2>${esc(this.config.title)}</h2>
         ${i.admin ? `<button data-a="reglages" aria-label="Réglages des visiteurs" title="Réglages">⚙️</button>` : ""}
         ${i.gestion ? `<button class="p" data-a="nouveau">＋ Visiteur</button>` : ""}</div>
+      ${i.lecteurs?.erreur ? `<p class="warn" role="alert">⚠️ ${esc(i.lecteurs.erreur)}</p>` : ""}
       ${cur.length ? `<h3>En ce moment</h3>${cur.map((v) => this._item(v)).join("")}` : `<p class="vide">Aucun visiteur en ce moment.</p>`}
       ${next.length ? `<h3>À venir</h3>${next.map((v) => this._item(v)).join("")}` : ""}
       ${done.length ? `<details ${this._open ? "open" : ""}><summary>Terminées (${done.length})</summary>${done.map((v) => this._item(v)).join("")}</details>` : ""}`;
@@ -267,6 +268,9 @@ class VisiteursCard extends HTMLElement {
       const names = Object.fromEntries((i.acces || []).map((a) => [a.entity_id, a.nom]));
       tags.push(`<span class="tag">ouvre : ${esc(v.acces.map((e) => names[e] || e).join(", "))}</span>`);
     }
+    if (v.lecteur) tags.push(`<span class="tag ok">🔢 code sur le lecteur</span>`);
+    if (v.notif_effective === "journal") tags.push(`<span class="tag">📒 journal</span>`);
+    if (v.notif_effective === "aucune") tags.push(`<span class="tag">🔕</span>`);
     if (v.note) tags.push(`<span class="tag">📝 ${esc(v.note)}</span>`);
     const sure = (k) => this.sure === `${k}:${v.id}`;
     const acts = !g ? "" : `<div class="acts">
@@ -290,6 +294,7 @@ class VisiteursCard extends HTMLElement {
     if (!v) {
       return { id: null, nom: "", type: "sur_place", maintenant: true, debut: toLocalInput(new Date(now.getTime() + 3600e3)),
         fin: null, choix: null, plaques: "", telephone: "", note: "", code: false, acces: [], alarme: false, err: "", busy: false, statut: "nouvelle",
+        notif: "auto", codeval: "",
         ...this._repDefaults(now) };
     }
     if (v.recurrence) {
@@ -298,13 +303,14 @@ class VisiteursCard extends HTMLElement {
         depuis: dateInput(new Date(v.serie_debut || v.debut)), jusqu: dateInput(lastDay(v.serie_fin || v.fin)),
         maintenant: false, debut: toLocalInput(new Date(now.getTime() + 3600e3)), fin: null, choix: null,
         plaques: (v.plaques || []).join(", "), telephone: v.telephone || "", note: v.note || "",
-        code: !!v.a_un_code, codeMode: "garder", acces: [...(v.acces || [])], alarme: !!v.alarme, err: "", busy: false, statut: v.statut };
+        code: !!v.a_un_code, codeMode: "garder", acces: [...(v.acces || [])], alarme: !!v.alarme, err: "", busy: false, statut: v.statut,
+        notif: v.notifications || "auto", codeval: "" };
     }
     return { id: v.id, nom: v.nom, type: v.type, maintenant: false, debut: toLocalInput(new Date(v.debut)),
       fin: toLocalInput(new Date(v.statut === "terminee" ? Math.max(Date.now() + 2 * 3600e3, new Date(v.fin)) : new Date(v.fin))),
       choix: "autre", plaques: (v.plaques || []).join(", "), telephone: v.telephone || "", note: v.note || "",
       code: !!v.a_un_code, codeMode: "garder", acces: [...(v.acces || [])], alarme: !!v.alarme, err: "", busy: false, statut: v.statut,
-      ...this._repDefaults(now) };
+      notif: v.notifications || "auto", codeval: "", ...this._repDefaults(now) };
   }
 
   _repDefaults(now) {
@@ -338,12 +344,17 @@ class VisiteursCard extends HTMLElement {
       ${f.regulier ? this._repHtml(f) : this._onceHtml(f, started, quick, fin, start)}
       <label class="c" for="plaques">Véhicule (plaque, facultatif)</label><input id="plaques" type="text" maxlength="60" value="${esc(f.plaques)}" placeholder="AB-123-CD" autocapitalize="characters">
       <label class="c" for="tel">Téléphone (pour lui envoyer le message)</label><input id="tel" type="tel" maxlength="30" value="${esc(f.telephone)}">
-      ${acc.length ? `<label class="chk"><input type="checkbox" id="code" ${f.code ? "checked" : ""}> Donner un code visiteur (tablette)</label>
-        ${f.code ? `<div style="margin-left:8px">${acc.map((a) => `<label class="chk"><input type="checkbox" data-acc="${esc(a.entity_id)}" ${f.acces.includes(a.entity_id) ? "checked" : ""}> ${esc(a.nom)}${a.alarme ? " (alarme)" : ""}</label>`).join("")}
+      ${acc.length ? `<label class="chk"><input type="checkbox" id="code" ${f.code ? "checked" : ""}> Donner un code visiteur (tablette${acc.some((a) => a.lecteur) ? ", lecteur" : ""})</label>
+        ${f.code ? `<div style="margin-left:8px">${acc.map((a) => `<label class="chk"><input type="checkbox" data-acc="${esc(a.entity_id)}" ${f.acces.includes(a.entity_id) ? "checked" : ""}> ${esc(a.nom)}${a.alarme ? " (alarme)" : ""}${a.lecteur ? " — clavier du lecteur UniFi" : ""}</label>`).join("")}
           ${alarmChecked ? `<label class="chk"><input type="checkbox" id="alarme" ${f.alarme ? "checked" : ""}> Peut désarmer l'alarme</label><div class="warn">Sans cette case, le code ne désarme jamais l'alarme.</div>` : ""}
-          ${f.id && f.codeMode !== undefined && this._wasCoded ? `<label class="chk"><input type="checkbox" id="nouveaucode" ${f.codeMode === "nouveau" ? "checked" : ""}> Changer le code</label>` : ""}
-          <div class="res">Le code ne marche que pendant la visite, sur les tablettes, et vous prévient à chaque usage.</div></div>` : ""}`
+          ${f.id && this._wasCoded ? `<label class="chk"><input type="checkbox" id="nouveaucode" ${f.codeMode === "nouveau" ? "checked" : ""}> Changer le code</label>` : ""}
+          ${!f.id || !this._wasCoded || f.codeMode === "nouveau" ? `<label class="c" for="codeval">Code (vide : choisi au hasard)</label>
+            <input id="codeval" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" value="${esc(f.codeval)}" placeholder="ex. le même code que sur l'autre site" style="max-width:260px;letter-spacing:.2em">` : ""}
+          <div class="res">Le code ne marche que pendant la visite (tablettes${acc.some((a) => a.lecteur) ? " et lecteurs UniFi cochés" : ""}). Même personne sur un autre site : mettez le même code.</div></div>` : ""}`
         : ""}
+      <label class="c">Me prévenir</label><div class="seg">
+        ${[["auto", "Par défaut"], ["telephones", "📱 Téléphones"], ["journal", "📒 Journal"], ["aucune", "🔕 Rien"]].map(([k, lab]) => `<button data-f="notif" data-v="${k}" class="${f.notif === k ? "on" : ""}">${lab}</button>`).join("")}</div>
+      <div class="res">${{ auto: f.regulier ? "Par défaut, une visite régulière est notée dans le journal sans alerter les téléphones." : "Par défaut : arrivée, départ et codes sur les téléphones.", telephones: "Arrivée, départ et usage du code sur les téléphones.", journal: "Noté dans le journal (Discord) seulement, sans alerter les téléphones.", aucune: "Aucun message pour cette visite." }[f.notif]}</div>
       <label class="c" for="note">Note</label><textarea id="note" maxlength="500">${esc(f.note)}</textarea>
       <div class="pied"><button data-a="annuler">Annuler</button><button class="p" data-a="enregistrer" ${f.busy ? "disabled" : ""}>Enregistrer</button></div>
     </div></div>`;
@@ -460,7 +471,8 @@ class VisiteursCard extends HTMLElement {
         <option value="">Aucune</option>${d.lumieres_possibles.map((l) => `<option value="${esc(l.entity_id)}" ${v.lumiere_accueil === l.entity_id ? "selected" : ""}>${esc(l.nom)}</option>`).join("")}</select>
       <h3>Accès qu'on peut donner avec un code visiteur</h3>
       <div class="res">Pour chaque visite, on coche ensuite seulement ceux qu'on veut.</div>
-      ${d.acces_possibles.map((a) => `<label class="chk"><input type="checkbox" data-racc="${esc(a.entity_id)}" ${(v.acces_proposes || []).includes(a.entity_id) ? "checked" : ""}> ${esc(a.nom)}${a.alarme ? " (alarme)" : ""}</label>`).join("") || `<p class="vide">Aucune porte, serrure ou alarme trouvée.</p>`}
+      ${d.acces_possibles.map((a) => `<label class="chk"><input type="checkbox" data-racc="${esc(a.entity_id)}" ${(v.acces_proposes || []).includes(a.entity_id) ? "checked" : ""}> ${esc(a.nom)}${a.alarme ? " (alarme)" : ""}${a.lecteur ? " — lecteur UniFi Access (code au clavier)" : ""}</label>`).join("") || `<p class="vide">Aucune porte, serrure ou alarme trouvée.</p>`}
+      ${d.acces_possibles.some((a) => a.lecteur) ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px"><button data-a="r_lecteurs">Tester UniFi Access</button><span class="res">${esc(r.lect || "")}</span></div>` : ""}
       <h3>Comportement pendant une visite</h3>
       ${Object.entries(d.regles).map(([k, lab]) => `<label class="chk"><input type="checkbox" data-rb="${k}" ${v[k] !== false ? "checked" : ""}> ${esc(lab)}</label>`).join("")}
       <label class="c">Nuit (de … à …)</label><div style="display:flex;gap:8px;align-items:center">${timeIn("nuit_debut")} → ${timeIn("nuit_fin")}</div>
@@ -494,6 +506,17 @@ class VisiteursCard extends HTMLElement {
       if (!r.ok) { this.reg = null; this._toast(r.message); return this._render(); }
       this.reg.data = r; this.reg.v = { ...r.valeurs };
     } catch (e) { this.reg = null; this._toast(e?.message || String(e)); }
+    this._render();
+  }
+
+  async _testLecteurs() {
+    this._readReg();
+    this.reg.lect = "Test…"; this._render();
+    try {
+      const r = await this._ws({ type: "visiteurs/lecteurs" });
+      const l = r.lecteurs || {};
+      this.reg.lect = !r.ok ? r.message : l.ok ? `✅ Connecté — ${(l.portes || []).map((p) => p.nom).join(", ") || "aucune porte"}` : `❌ ${l.message}`;
+    } catch (e) { this.reg.lect = `❌ ${e?.message || e}`; }
     this._render();
   }
 
@@ -547,6 +570,7 @@ class VisiteursCard extends HTMLElement {
     if (R.getElementById("rep_depuis")) f.depuis = val("rep_depuis");
     if (R.getElementById("rep_jusqu")) f.jusqu = val("rep_jusqu");
     if (R.getElementById("alarme")) f.alarme = R.getElementById("alarme").checked;
+    if (R.getElementById("codeval")) f.codeval = val("codeval").replace(/\D/g, "");
     if (R.getElementById("nouveaucode")) f.codeMode = R.getElementById("nouveaucode").checked ? "nouveau" : "garder";
   }
 
@@ -562,6 +586,7 @@ class VisiteursCard extends HTMLElement {
         else if (k === "regulier") { this.form.regulier = v === "1"; if (this.form.regulier && !this.form.id) this.form.type = "passage"; }
         else if (k === "jour") { const n = +v; this.form.jours = this.form.jours.includes(n) ? this.form.jours.filter((x) => x !== n) : [...this.form.jours, n].sort(); }
         else if (k === "toutes") this.form.toutes = +v;
+        else if (k === "notif") this.form.notif = v;
         else if (k === "type") { this.form.type = v; if (this.form.choix !== "autre") this.form.choix = null; }
         else if (k === "choix") {
           this.form.choix = v;
@@ -570,6 +595,7 @@ class VisiteursCard extends HTMLElement {
         this._render();
       }));
       R.getElementById("code")?.addEventListener("change", (e) => { this._readForm(); this.form.code = e.target.checked; this._render(); });
+      R.getElementById("nouveaucode")?.addEventListener("change", () => { this._readForm(); this._render(); });
       R.querySelectorAll("[data-acc]").forEach((c) => c.addEventListener("change", () => {
         this._readForm();
         const id = c.dataset.acc;
@@ -598,6 +624,7 @@ class VisiteursCard extends HTMLElement {
       case "r_annuler": this.reg = null; break;
       case "r_enregistrer": return this._saveReg(false);
       case "r_gen": return this._saveReg(true);
+      case "r_lecteurs": return this._testLecteurs();
       case "nouveau": this.form = this._newForm(null); this._wasCoded = false; this._focused = false; break;
       case "modifier": this.form = this._newForm(v); this._wasCoded = !!v?.a_un_code; this._focused = false; break;
       case "annuler": this.form = null; break;
@@ -676,13 +703,15 @@ class VisiteursCard extends HTMLElement {
     if (f.choix === "autre" && !fin) { f.err = "Indiquer l'heure de départ."; return this._render(); }
     if (fin && fin <= base && f.statut !== "en_cours") { f.err = "Le départ doit être après l'arrivée."; return this._render(); }
     if (f.code && !f.acces.length) { f.err = "Cocher au moins un accès pour le code (ou décocher le code)."; return this._render(); }
+    if (f.code && f.codeval && !/^\d{4,8}$/.test(f.codeval)) { f.err = "Le code : 4 à 8 chiffres."; return this._render(); }
     const msg = { type: f.id ? "visiteurs/modifier" : "visiteurs/ajouter", nom, type_visite: f.type, plaques: f.plaques,
       telephone: f.telephone, note: f.note, acces: f.code ? f.acces : [], alarme: f.code && f.alarme };
     if (f.id) msg.visite = f.id;
     if (f.statut !== "en_cours" && start) msg.debut = toServer(start); // « là maintenant » : le serveur prend l'heure actuelle
     if (fin) msg.fin = toServer(fin);
     if (!i.acces?.length) delete msg.acces;
-    msg.code = f.code ? (f.id && this._wasCoded ? (f.codeMode || "garder") : "nouveau") : "aucun";
+    msg.code = this._codeValue(f);
+    if (f.notif !== "auto") msg.notifications = f.notif; else if (f.id) msg.notifications = "auto";
     if (!f.id && !f.code) msg.code = false;
     if (f.wasSerie) { // série → visite simple
       msg.repetition_jours = [];
@@ -692,19 +721,27 @@ class VisiteursCard extends HTMLElement {
     return this._send(msg, f);
   }
 
+  _codeValue(f) {
+    if (!f.code) return "aucun";
+    if (f.id && this._wasCoded && f.codeMode !== "nouveau") return "garder";
+    return f.codeval || "nouveau";
+  }
+
   _saveSerie(f, nom) {
     const i = this.info;
     if (!f.jours.length) { f.err = "Choisir au moins un jour."; return this._render(); }
     if (!f.de || !f.a || f.de === f.a) { f.err = "Indiquer l'heure de début et l'heure de fin (différentes)."; return this._render(); }
     if (!f.depuis || !f.jusqu || f.jusqu < f.depuis) { f.err = "La fin de la période doit être après son début."; return this._render(); }
     if (f.code && !f.acces.length) { f.err = "Cocher au moins un accès pour le code (ou décocher le code)."; return this._render(); }
+    if (f.code && f.codeval && !/^\d{4,8}$/.test(f.codeval)) { f.err = "Le code : 4 à 8 chiffres."; return this._render(); }
     const msg = { type: f.id ? "visiteurs/modifier" : "visiteurs/ajouter", nom, type_visite: f.type, plaques: f.plaques,
       telephone: f.telephone, note: f.note, acces: f.code ? f.acces : [], alarme: f.code && f.alarme,
       repetition_jours: f.jours.map((n) => JLONG[n]), heure_debut: f.de, heure_fin: f.a, toutes_les: f.toutes,
       debut: f.depuis, jusqu_au: f.jusqu };
     if (f.id) msg.visite = f.id;
     if (!i.acces?.length) delete msg.acces;
-    msg.code = f.code ? (f.id && this._wasCoded ? (f.codeMode || "garder") : "nouveau") : "aucun";
+    msg.code = this._codeValue(f);
+    if (f.notif !== "auto") msg.notifications = f.notif; else if (f.id) msg.notifications = "auto";
     if (!f.id && !f.code) msg.code = false;
     return this._send(msg, f);
   }
