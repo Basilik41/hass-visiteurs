@@ -34,7 +34,8 @@ class EnCours(VisiteursEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         cur = self.mgr.current()
         return {"visites": [brief(v) for v in cur], "noms": [v.get("nom") for v in cur],
-                "plaques": self.mgr.plates(), "sur_lecteur": [v.get("nom") for v in cur if v["id"] in self.mgr.unifi]}
+                "plaques": self.mgr.plates(), "sur_lecteur": [v.get("nom") for v in cur if v["id"] in self.mgr.unifi],
+                "longueur_code_lecteur": self.mgr.access.pin_length}
 
 
 class Prochaine(VisiteursEntity, SensorEntity):

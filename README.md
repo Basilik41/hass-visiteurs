@@ -71,4 +71,4 @@ Ils ne changent rien seuls : ce sont vos automatisations qui les lisent. Réserv
 
 ## Tests
 
-`tests/test_visites.py` (fonctions pures, 16), `tests/bench_visiteurs.py` (105 contrôles + 5 après redémarrage, avec une imitation de l'API UniFi Access sur un vrai Home Assistant avec *Codes d'accès* 1.1), `tests/card_test.py` (49 contrôles dans Chromium : ordinateur, téléphone 380 px, tablette).
+`tests/test_visites.py` (fonctions pures, 16), `tests/bench_visiteurs.py` (108 contrôles + 5 après redémarrage, avec une imitation de l'API UniFi Access sur un vrai Home Assistant avec *Codes d'accès* 1.1), `tests/card_test.py` (49 contrôles dans Chromium : ordinateur, téléphone 380 px, tablette).

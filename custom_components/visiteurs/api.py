@@ -237,7 +237,8 @@ async def ws_info(hass: HomeAssistant, conn: websocket_api.ActiveConnection, msg
         "acces": m.access_choices() if manage else [], "wifi": m.wifi(), "consignes": m.o.get(CONF_CONSIGNES) or "",
         "durees": {"passage": m.o.get(CONF_DUREE_PASSAGE), "sur_place": m.o.get(CONF_DUREE_SUR_PLACE)},
         "nuit": m.is_night(), "maintenant": dt_util.utcnow().isoformat(), "admin": _is_admin(conn.user),
-        "lecteurs": {"disponible": m.access.available, "erreur": m.access.last_error if manage else None},
+        "lecteurs": {"disponible": m.access.available, "erreur": m.access.last_error if manage else None,
+                     "longueur_code": m.access.pin_length},
     }
 
 

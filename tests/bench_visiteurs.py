@@ -576,6 +576,23 @@ async def main() -> None:
             ess = r["lecteurs"].get("essai") or []
             check("UniFi Access : essai complet (PIN proposé, création, code, suppression)", len(ess) == 5 and all(
                 "refus" not in x and "impossible" not in x for x in ess) and not (await fake(s))["visiteurs"], str(ess))
+            r = await w.ok({"type": "visiteurs/ajouter", "nom": "Trop court", "type_visite": "passage", "code": "5839",
+                            "acces": [SEL], "duree": 1})
+            check("code de mauvaise longueur pour le lecteur → refusé avec la longueur attendue", r["ok"] is False and
+                  "6 chiffres" in r.get("message", ""), str(r))
+            r = await w.ok({"type": "visiteurs/ajouter", "nom": "Auto", "type_visite": "passage", "code": True,
+                            "acces": [SEL], "duree": 1, "notifications": "aucune"})
+            await fake(s, {"pin_propose": "6720"})
+            await w.ok({"type": "visiteurs/lecteurs"})
+            r2 = await w.ok({"type": "visiteurs/ajouter", "nom": "Auto4", "type_visite": "passage", "code": True,
+                             "acces": [SEL], "duree": 1, "notifications": "aucune"})
+            check("code tiré au hasard à la longueur du lecteur (6 puis 4 chiffres)", len(r["visite"]["code"]) == 6 and
+                  len(r2["visite"]["code"]) == 4, f"{r['visite']['code']} {r2['visite']['code']}")
+            await fake(s, {"pin_propose": "672034"})
+            await w.ok({"type": "visiteurs/lecteurs"})
+            for x in (r, r2):
+                await w.ok({"type": "visiteurs/supprimer", "visite": x["visite"]["id"]})
+            await asyncio.sleep(1)
             r = await w.ok({"type": "visiteurs/ajouter", "nom": "Livreur", "type_visite": "passage", "code": "583920",
                             "acces": ["cover.porte_banc", SEL], "duree": 1, "notifications": "aucune"})
             liv = r.get("visite", {})

@@ -2652,6 +2652,7 @@ class VisiteursCard extends HTMLElement {
           ${f.id && this._wasCoded ? `<label class="chk"><input type="checkbox" id="nouveaucode" ${f.codeMode === "nouveau" ? "checked" : ""}> Changer le code</label>` : ""}
           ${!f.id || !this._wasCoded || f.codeMode === "nouveau" ? `<label class="c" for="codeval">Code (vide : choisi au hasard)</label>
             <input id="codeval" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" value="${esc(f.codeval)}" placeholder="ex. le même code que sur l'autre site" style="max-width:260px;letter-spacing:.2em">` : ""}
+          ${this._lenLecteur(f) ? `<div class="res">Le lecteur UniFi attend un code de <b>${this._lenLecteur(f)} chiffres</b>.</div>` : ""}
           <div class="res">Le code ne marche que pendant la visite (tablettes${acc.some((a) => a.lecteur) ? " et lecteurs UniFi cochés" : ""}). Même personne sur un autre site : mettez le même code.</div></div>` : ""}`
         : ""}
       <label class="c">Me prévenir</label><div class="seg">
@@ -2817,7 +2818,7 @@ class VisiteursCard extends HTMLElement {
     try {
       const r = await this._ws({ type: "visiteurs/lecteurs" });
       const l = r.lecteurs || {};
-      this.reg.lect = !r.ok ? r.message : l.ok ? `✅ Connecté — ${(l.portes || []).map((p) => p.nom).join(", ") || "aucune porte"}` : `❌ ${l.message}`;
+      this.reg.lect = !r.ok ? r.message : l.ok ? `✅ Connecté — ${(l.portes || []).map((p) => p.nom).join(", ") || "aucune porte"}${l.longueur_code ? ` — codes de ${l.longueur_code} chiffres` : ""}` : `❌ ${l.message}`;
     } catch (e) { this.reg.lect = `❌ ${e?.message || e}`; }
     this._render();
   }
@@ -3006,6 +3007,7 @@ class VisiteursCard extends HTMLElement {
     if (fin && fin <= base && f.statut !== "en_cours") { f.err = "Le départ doit être après l'arrivée."; return this._render(); }
     if (f.code && !f.acces.length) { f.err = "Cocher au moins un accès pour le code (ou décocher le code)."; return this._render(); }
     if (f.code && f.codeval && !/^\d{4,8}$/.test(f.codeval)) { f.err = "Le code : 4 à 8 chiffres."; return this._render(); }
+    if (f.code && f.codeval && this._lenLecteur(f) && f.codeval.length !== this._lenLecteur(f)) { f.err = `Le lecteur UniFi attend un code de ${this._lenLecteur(f)} chiffres.`; return this._render(); }
     const msg = { type: f.id ? "visiteurs/modifier" : "visiteurs/ajouter", nom, type_visite: f.type, plaques: f.plaques,
       telephone: f.telephone, note: f.note, acces: f.code ? f.acces : [], alarme: f.code && f.alarme };
     if (f.id) msg.visite = f.id;
@@ -3023,6 +3025,13 @@ class VisiteursCard extends HTMLElement {
     return this._send(msg, f);
   }
 
+  _lenLecteur(f) {
+    const i = this.info, n = i?.lecteurs?.longueur_code;
+    if (!n) return null;
+    const lect = new Set((i.acces || []).filter((a) => a.lecteur).map((a) => a.entity_id));
+    return f.acces.some((e) => lect.has(e)) ? n : null;
+  }
+
   _codeValue(f) {
     if (!f.code) return "aucun";
     if (f.id && this._wasCoded && f.codeMode !== "nouveau") return "garder";
@@ -3036,6 +3045,7 @@ class VisiteursCard extends HTMLElement {
     if (!f.depuis || !f.jusqu || f.jusqu < f.depuis) { f.err = "La fin de la période doit être après son début."; return this._render(); }
     if (f.code && !f.acces.length) { f.err = "Cocher au moins un accès pour le code (ou décocher le code)."; return this._render(); }
     if (f.code && f.codeval && !/^\d{4,8}$/.test(f.codeval)) { f.err = "Le code : 4 à 8 chiffres."; return this._render(); }
+    if (f.code && f.codeval && this._lenLecteur(f) && f.codeval.length !== this._lenLecteur(f)) { f.err = `Le lecteur UniFi attend un code de ${this._lenLecteur(f)} chiffres.`; return this._render(); }
     const msg = { type: f.id ? "visiteurs/modifier" : "visiteurs/ajouter", nom, type_visite: f.type, plaques: f.plaques,
       telephone: f.telephone, note: f.note, acces: f.code ? f.acces : [], alarme: f.code && f.alarme,
       repetition_jours: f.jours.map((n) => JLONG[n]), heure_debut: f.de, heure_fin: f.a, toutes_les: f.toutes,

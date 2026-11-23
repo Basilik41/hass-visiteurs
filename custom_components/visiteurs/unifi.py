@@ -60,6 +60,7 @@ class AccessSync:
         self.last_error: str | None = None
         self._told: str | None = None       # dernière erreur signalée (pas de répétition)
         self._cleaned = False
+        self.pin_length: int | None = None  # longueur des PIN imposée par UniFi Access (réglage « PIN »)
 
     # ───────── connexion ─────────
     def _config(self) -> tuple[str, str, bool] | None:
@@ -101,6 +102,19 @@ class AccessSync:
         except TimeoutError as err:
             raise AccessError(f"UniFi Access ne répond pas ({host}).") from err
 
+    async def detect_length(self) -> int | None:
+        """Longueur des PIN : celle d'un PIN proposé par UniFi Access (réglage « longueur fixe » 4, 6 ou 8)."""
+        if not self.available:
+            return None
+        try:
+            gen = await self._req("POST", "/credentials/pin_codes")
+        except AccessError:
+            return self.pin_length
+        if isinstance(gen, str) and gen.isdigit() and 4 <= len(gen) <= 8:
+            self.pin_length = len(gen)
+            self.m._notify_listeners()
+        return self.pin_length
+
     # ───────── diagnostic (réglages) ─────────
     async def check(self) -> dict:
         """Ce que voit le module : portes, et droit de gérer les visiteurs."""
@@ -111,8 +125,9 @@ class AccessSync:
             await self._req("GET", "/visitors", params={"page_num": 1, "page_size": 1})
         except AccessError as err:
             return {"ok": False, "message": str(err)}
-        return {"ok": True, "portes": [{"id": d.get("id"), "nom": d.get("full_name") or d.get("name")}
-                                       for d in doors or []]}
+        await self.detect_length()
+        return {"ok": True, "longueur_code": self.pin_length,
+                "portes": [{"id": d.get("id"), "nom": d.get("full_name") or d.get("name")} for d in doors or []]}
 
     async def essai(self, pin: str) -> list[str]:
         """Essai complet sans toucher aux visites : PIN proposé par UniFi, visiteur de test (demain), code de

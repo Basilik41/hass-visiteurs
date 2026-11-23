@@ -24,6 +24,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CODE_LEN,
     CODE_PIN_PROVIDER,
     CONF_ACCES,
     CONF_CONSIGNES,
@@ -153,8 +154,12 @@ class Visiteurs:
         self.hass.data[CODE_PIN_PROVIDER] = self
         self._started = True
         self._schedule()
-        self.hass.async_create_task(self.access.sync())
+        self.hass.async_create_task(self._start_access())
         self.hass.async_create_task(self._reminders())
+
+    async def _start_access(self) -> None:
+        await self.access.detect_length()
+        await self.access.sync()
 
     async def async_stop(self) -> None:
         for u in self._unsubs:
@@ -472,16 +477,29 @@ class Visiteurs:
                 v.pop("code", None)
                 v.pop("code_h", None)
             elif want is True or want == "nouveau" or (want == "garder" and not v.get("code")):
-                c = generate_code(self._taken_codes(v.get("id")))
+                c = generate_code(self._taken_codes(v.get("id")), self._code_length(v))
                 v["code"], v["code_h"] = c, _hash(c)
             elif isinstance(want, str) and want.isdigit():
                 if code_problem(want):
                     raise VisiteError("code", "Code refusé : 4 à 8 chiffres, pas trop simple.")
                 if want in self._taken_codes(v.get("id")):
                     raise VisiteError("code", "Ce code est déjà donné à un autre visiteur.")
+                n = self._reader_length(v)
+                if n and len(want) != n:
+                    raise VisiteError("code", f"Le lecteur UniFi Access attend un code de {n} chiffres "
+                                              "(réglage UniFi Access › Paramètres › Général › PIN).")
                 v["code"], v["code_h"] = want, _hash(want)
         if v.get("code") and not v.get("acces") and not v.get("alarme"):
             raise VisiteError("acces", "Cocher au moins un accès pour le code visiteur (ou retirer le code).")
+
+    def _reader_length(self, v: dict) -> int | None:
+        """Longueur imposée par les lecteurs UniFi Access, si la visite en ouvre un."""
+        if any(is_access_entity(self.hass, e) for e in v.get("acces") or []):
+            return self.access.pin_length
+        return None
+
+    def _code_length(self, v: dict) -> int:
+        return self._reader_length(v) or CODE_LEN
 
     async def add(self, data: dict, who: str) -> dict:
         vid = uuid.uuid4().hex[:10]
