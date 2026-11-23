@@ -17,6 +17,8 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
+from homeassistant.const import EVENT_STATE_CHANGED
+from homeassistant.core import Event, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -29,6 +31,7 @@ _LOGGER = logging.getLogger(__name__)
 PORT = 12445
 MARQUE = "Home Assistant · Visiteurs"   # dans les « remarques » des visiteurs UniFi créés par le module
 SUFFIXE = "-unlock"                     # unique_id des boutons « Déverrouiller » de l'intégration UniFi Access
+SUFFIXE_ACCES = "-access"               # unique_id des événements « Accès » (badge, code, appli) par porte
 PLATFORM = "unifi_access"
 
 
@@ -61,6 +64,42 @@ class AccessSync:
         self._told: str | None = None       # dernière erreur signalée (pas de répétition)
         self._cleaned = False
         self.pin_length: int | None = None  # longueur des PIN imposée par UniFi Access (réglage « PIN »)
+
+    # ───────── arrivée au lecteur ─────────
+    @callback
+    def listen(self) -> callable:
+        """Un visiteur qui tape son code au lecteur est noté « arrivé·e » (événement « Accès » de la porte)."""
+        return self.hass.bus.async_listen(EVENT_STATE_CHANGED, self._on_state, event_filter=self._is_access_event)
+
+    @callback
+    def _is_access_event(self, data: dict) -> bool:
+        eid = data.get("entity_id") or ""
+        if not eid.startswith("event.") or data.get("new_state") is None:
+            return False
+        ent = er.async_get(self.hass).async_get(eid)
+        return bool(ent and ent.platform == PLATFORM and (ent.unique_id or "").endswith(SUFFIXE_ACCES))
+
+    @callback
+    def _on_state(self, event: Event) -> None:
+        new, old = event.data["new_state"], event.data.get("old_state")
+        if old is not None and old.state == new.state:
+            return  # simple mise à jour d'attributs
+        if new.attributes.get("event_type") != "access_granted":
+            return
+        ent = er.async_get(self.hass).async_get(new.entity_id)
+        door = ent.unique_id[: -len(SUFFIXE_ACCES)] if ent else None
+        actor = str(new.attributes.get("actor") or "").strip().lower()
+        if not door or not actor:
+            return
+        for v in self.m.current():
+            if v["id"] not in self.m.unifi:
+                continue
+            nom = (v.get("nom") or "")[:30].strip().lower()
+            doors = {door_id(self.hass, e) for e in v.get("acces") or []}
+            if nom and door in doors and actor.startswith(nom):
+                porte = (new.name or "").replace(" Accès", "").replace(" Access", "") or "lecteur"
+                self.hass.async_create_task(self.m.mark_arrival(v["id"], f"code au lecteur {porte}"))
+                return
 
     # ───────── connexion ─────────
     def _config(self) -> tuple[str, str, bool] | None:

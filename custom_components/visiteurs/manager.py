@@ -151,6 +151,7 @@ class Visiteurs:
             async_track_time_change(self.hass, self._lights_off, hour=23, minute=0, second=0),
             async_track_time_change(self.hass, self._reminders, hour=10, minute=0, second=0),
         ]
+        self._unsubs.append(self.access.listen())
         self.hass.data[CODE_PIN_PROVIDER] = self
         self._started = True
         self._schedule()

@@ -67,8 +67,8 @@ Ils ne changent rien seuls : ce sont vos automatisations qui les lisent. Réserv
 - Le mot de passe du Wi-Fi invité est visible de tous les comptes (il est fait pour être donné) : ne pas y mettre celui du Wi-Fi principal.
 - Le code visiteur est conservé lisible pour la famille (pour pouvoir le renvoyer) dans le stockage privé de Home Assistant, et haché pour la vérification.
 - Passages réguliers : par semaine seulement (pas « le premier lundi du mois »). Un passage sauté ou arrêté disparaît de l'agenda.
-- Codes visiteur : tablettes murales (comptes « TabDomo… ») et lecteurs UniFi Access. L'arrivée au lecteur n'est pas encore notée comme « arrivé·e ».
+- Codes visiteur : tablettes murales (comptes « TabDomo… ») et lecteurs UniFi Access. Un code tapé au lecteur note le visiteur « arrivé·e » (événement « Accès » de la porte, reconnu par le nom du visiteur).
 
 ## Tests
 
-`tests/test_visites.py` (fonctions pures, 16), `tests/bench_visiteurs.py` (108 contrôles + 5 après redémarrage, avec une imitation de l'API UniFi Access sur un vrai Home Assistant avec *Codes d'accès* 1.1), `tests/card_test.py` (49 contrôles dans Chromium : ordinateur, téléphone 380 px, tablette).
+`tests/test_visites.py` (fonctions pures, 16), `tests/bench_visiteurs.py` (110 contrôles + 5 après redémarrage, avec une imitation de l'API UniFi Access sur un vrai Home Assistant avec *Codes d'accès* 1.1), `tests/card_test.py` (49 contrôles dans Chromium : ordinateur, téléphone 380 px, tablette).

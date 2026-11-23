@@ -645,6 +645,23 @@ async def main() -> None:
             await asyncio.sleep(2)
             vs = list((await fake(s))["visiteurs"].values())
             check("UniFi Access : passage en cours → code sur le lecteur", len(vs) == 1 and vs[0]["pin"] == "720461", str(vs))
+            EV = next(e["entity_id"] for e in reg if e.get("platform") == "unifi_access" and e["entity_id"].startswith("event."))
+            hh = {"Authorization": f"Bearer {A}"}
+            async with s.post(f"{BASE}/api/states/{EV}", headers=hh, json={"state": datetime.now().isoformat(), "attributes": {
+                    "event_type": "access_granted", "actor": "Quelqu'un d'autre", "authentication": "NFC"}}) as r_:
+                pass
+            await asyncio.sleep(1)
+            info = await w.ok({"type": "visiteurs/info"})
+            g = next(v for v in info["visites"] if v["id"] == gp["id"])
+            check("lecteur : badge d'une autre personne → pas d'arrivée", not g.get("arrivee"), str(g.get("arrivee")))
+            async with s.post(f"{BASE}/api/states/{EV}", headers=hh, json={"state": (datetime.now() + timedelta(seconds=1)).isoformat(),
+                    "attributes": {"event_type": "access_granted", "actor": "Grand-père (visiteur)", "authentication": "PIN_CODE"}}) as r_:
+                pass
+            await asyncio.sleep(1)
+            info = await w.ok({"type": "visiteurs/info"})
+            g = next(v for v in info["visites"] if v["id"] == gp["id"])
+            check("lecteur : code tapé par le visiteur → arrivé·e", "lecteur" in ((g.get("arrivee") or {}).get("source") or ""),
+                  str(g.get("arrivee")))
             await w.ok({"type": "visiteurs/terminer", "visite": gp["id"]})
             await asyncio.sleep(2)
             check("UniFi Access : « Parti·e » → code retiré du lecteur", (await fake(s))["visiteurs"] == {})
