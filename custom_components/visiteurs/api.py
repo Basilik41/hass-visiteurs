@@ -386,7 +386,8 @@ async def ws_regler(hass: HomeAssistant, conn: websocket_api.ActiveConnection, m
     return _reglages(hass, m)
 
 
-@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/lecteurs"})
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/lecteurs",
+                                  vol.Optional("essai"): vol.All(cv.string, vol.Match(r"^\d{4,8}$"))})
 @websocket_api.async_response
 @_handler()
 async def ws_lecteurs(hass: HomeAssistant, conn: websocket_api.ActiveConnection, msg: dict, m: Visiteurs) -> dict:
@@ -394,6 +395,8 @@ async def ws_lecteurs(hass: HomeAssistant, conn: websocket_api.ActiveConnection,
     if not _is_admin(conn.user):
         raise VisiteError("admin", "Réservé aux administrateurs.")
     res = await m.access.check()
+    if msg.get("essai") and res.get("ok"):
+        res["essai"] = await m.access.essai(msg["essai"])
     res["visiteurs_crees"] = len(m.unifi)
     res["erreur"] = m.access.last_error
     return {"lecteurs": res}

@@ -114,6 +114,41 @@ class AccessSync:
         return {"ok": True, "portes": [{"id": d.get("id"), "nom": d.get("full_name") or d.get("name")}
                                        for d in doors or []]}
 
+    async def essai(self, pin: str) -> list[str]:
+        """Essai complet sans toucher aux visites : PIN proposé par UniFi, visiteur de test (demain), code de
+        la visite puis code proposé, suppression. Sert à comprendre un refus du lecteur."""
+        import time as _t
+        steps: list[str] = []
+        gen = None
+        try:
+            gen = await self._req("POST", "/credentials/pin_codes")
+            steps.append(f"PIN proposé par UniFi : {len(str(gen))} chiffres")
+        except AccessError as err:
+            steps.append(f"PIN proposé par UniFi : impossible ({err})")
+        now = int(_t.time())
+        try:
+            data = await self._req("POST", "/visitors", {
+                "first_name": "Essai", "last_name": "(visiteur)", "remarks": MARQUE, "start_time": now + 86400,
+                "end_time": now + 90000, "visit_reason": "Others", "resources": []})
+            vid = data.get("id")
+            steps.append("création d'un visiteur : OK")
+        except AccessError as err:
+            return [*steps, f"création d'un visiteur : refusée ({err})"]
+        for label, code in ((f"code de {len(pin)} chiffres", pin), ("PIN proposé", str(gen) if gen else None)):
+            if not code:
+                continue
+            try:
+                await self._req("PUT", f"/visitors/{vid}/pin_codes", {"pin_code": code})
+                steps.append(f"{label} : accepté")
+            except AccessError as err:
+                steps.append(f"{label} : refusé ({err})")
+        try:
+            await self._delete(vid)
+            steps.append("suppression : OK")
+        except AccessError as err:
+            steps.append(f"suppression : refusée ({err})")
+        return steps
+
     # ───────── synchronisation ─────────
     def _desired(self) -> dict[str, dict]:
         out = {}

@@ -572,6 +572,10 @@ async def main() -> None:
             r = await w.ok({"type": "visiteurs/lecteurs"})
             check("UniFi Access : test de connexion (portes, droits)", r["lecteurs"]["ok"] and "sellerie" in
                   json.dumps(r["lecteurs"]["portes"]), str(r))
+            r = await w.ok({"type": "visiteurs/lecteurs", "essai": "583921"})
+            ess = r["lecteurs"].get("essai") or []
+            check("UniFi Access : essai complet (PIN proposé, création, code, suppression)", len(ess) == 5 and all(
+                "refus" not in x and "impossible" not in x for x in ess) and not (await fake(s))["visiteurs"], str(ess))
             r = await w.ok({"type": "visiteurs/ajouter", "nom": "Livreur", "type_visite": "passage", "code": "583920",
                             "acces": ["cover.porte_banc", SEL], "duree": 1, "notifications": "aucune"})
             liv = r.get("visite", {})
